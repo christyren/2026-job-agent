@@ -1,0 +1,38 @@
+[
+  {
+    "id": "sample:101",
+    "source": "sample",
+    "external_id": "101",
+    "company": "ExampleCloud",
+    "title": "Software Engineer II, Backend",
+    "location": "Seattle, WA",
+    "url": "https://example.com/jobs/101",
+    "fetched_at": "2026-10-03T20:12:53+00:00",
+    "first_seen_at": "2026-10-03T20:12:53+00:00",
+    "last_seen_at": "2026-10-03T20:12:53+00:00"
+  },
+  {
+    "id": "sample:sha1:a6f831e577a2",
+    "source": "sample",
+    "external_id": "",
+    "company": "DataFlow",
+    "title": "Backend Engineer",
+    "location": "San Francisco, CA",
+    "url": "https://example.com/jobs/202",
+    "fetched_at": "2026-10-03T20:12:53+00:00",
+    "first_seen_at": "2026-10-03T20:12:53+00:00",
+    "last_seen_at": "2026-10-03T20:12:53+00:00"
+  },
+  {
+    "id": "sample:303",
+    "source": "sample",
+    "external_id": "303",
+    "company": "Microsoft",
+    "title": "Software Engineer II",
+    "location": "Redmond, WA",
+    "url": "https://example.com/jobs/303",
+    "fetched_at": "2026-10-03T20:12:53+00:00",
+    "first_seen_at": "2026-10-03T20:12:53+00:00",
+    "last_seen_at": "2026-10-03T20:12:53+00:00"
+  }
+]

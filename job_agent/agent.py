@@ -29,6 +29,8 @@ def _mock_decide(user_text: str):
     """
     text = user_text.lower()
     numbers = [int(n) for n in re.findall(r"\d+", text)]
+    if "fetch" in text or "抓" in user_text or "搜岗" in user_text or "拉取" in user_text:
+        return "fetch_jobs", {"source": "sample"}
     if "cost" in text or "成本" in user_text or "多少钱" in user_text:
         return "estimate_cost", {"num_jobs": numbers[0] if numbers else 100}
     if "preference" in text or "偏好" in user_text or "标准" in user_text or "criteria" in text:

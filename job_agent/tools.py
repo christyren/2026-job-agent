@@ -45,10 +45,43 @@ def estimate_cost(
     }
 
 
+def fetch_jobs(source: str = "sample", board: str = "") -> dict:
+    """Milestone 2 tool: fetch -> normalize -> deduplicate -> store (idempotent).
+
+    Run it twice with the same source: the second run must report new=0.
+    That is the pipeline's idempotency check, not a bug.
+    """
+    from .fetchers import fetch_greenhouse, fetch_sample
+    from .jobs import deduplicate, merge_into_store, normalize_job, utc_now_iso
+
+    if source == "greenhouse":
+        if not board:
+            raise ValueError("greenhouse source needs a board token, e.g. board='stripe'")
+        raw_jobs = fetch_greenhouse(board)
+    elif source == "sample":
+        raw_jobs = fetch_sample()
+    else:
+        raise ValueError(f"unknown source: {source} (use 'sample' or 'greenhouse')")
+
+    fetched_at = utc_now_iso()
+    normalized = [normalize_job(r, source=source, fetched_at=fetched_at) for r in raw_jobs]
+    unique, skipped_in_batch = deduplicate(normalized)
+    summary = merge_into_store(unique)
+    return {
+        "source": source,
+        "fetched": len(raw_jobs),
+        "duplicates_in_batch": skipped_in_batch,
+        **summary,
+        "fetched_at": fetched_at,
+        "store": "data/jobs.json",
+    }
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
     "estimate_cost": estimate_cost,
+    "fetch_jobs": fetch_jobs,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -70,6 +103,18 @@ TOOL_SCHEMAS = [
                 "output_tokens_per_job": {"type": "integer"},
             },
             "required": ["num_jobs"],
+        },
+    },
+    {
+        "name": "fetch_jobs",
+        "description": "Fetch job postings from a source, deduplicate them, and store them locally in data/jobs.json with source URL and fetch timestamp. Use source='sample' for the offline sample file, or source='greenhouse' with a board token for a company's public Greenhouse board. Safe to run repeatedly: duplicates are skipped.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["sample", "greenhouse"], "description": "Where to fetch jobs from"},
+                "board": {"type": "string", "description": "Greenhouse board token, required when source='greenhouse'"},
+            },
+            "required": [],
         },
     },
 ]
