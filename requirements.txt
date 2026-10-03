@@ -1,0 +1,3 @@
+# Mock mode needs nothing. Real LLM mode only:
+anthropic>=0.39
+python-dotenv>=1.0
