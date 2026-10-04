@@ -7,9 +7,9 @@
     "title": "Software Engineer II, Backend",
     "location": "Seattle, WA",
     "url": "https://example.com/jobs/101",
-    "fetched_at": "2026-10-03T20:12:53+00:00",
+    "fetched_at": "2026-10-04T20:17:33+00:00",
     "first_seen_at": "2026-10-03T20:12:53+00:00",
-    "last_seen_at": "2026-10-03T20:12:53+00:00"
+    "last_seen_at": "2026-10-04T20:17:33+00:00"
   },
   {
     "id": "sample:sha1:a6f831e577a2",
@@ -19,9 +19,9 @@
     "title": "Backend Engineer",
     "location": "San Francisco, CA",
     "url": "https://example.com/jobs/202",
-    "fetched_at": "2026-10-03T20:12:53+00:00",
+    "fetched_at": "2026-10-04T20:17:33+00:00",
     "first_seen_at": "2026-10-03T20:12:53+00:00",
-    "last_seen_at": "2026-10-03T20:12:53+00:00"
+    "last_seen_at": "2026-10-04T20:17:33+00:00"
   },
   {
     "id": "sample:303",
@@ -31,8 +31,8 @@
     "title": "Software Engineer II",
     "location": "Redmond, WA",
     "url": "https://example.com/jobs/303",
-    "fetched_at": "2026-10-03T20:12:53+00:00",
+    "fetched_at": "2026-10-04T20:17:33+00:00",
     "first_seen_at": "2026-10-03T20:12:53+00:00",
-    "last_seen_at": "2026-10-03T20:12:53+00:00"
+    "last_seen_at": "2026-10-04T20:17:33+00:00"
   }
 ]

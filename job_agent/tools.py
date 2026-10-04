@@ -77,11 +77,50 @@ def fetch_jobs(source: str = "sample", board: str = "") -> dict:
     }
 
 
+def score_jobs(source: str = "eval") -> dict:
+    """Milestone 3 tool: score jobs through hard rules -> structured scorer -> threshold.
+
+    source='eval'  -> score the 10 hand-labelled cases in data/eval_jobs.json
+                      and report accuracy (this is the eval run).
+    source='store' -> score the jobs already in data/jobs.json. Those records
+                      have no JD text / salary, so most will honestly land in
+                      needs_review — that is the threshold working, not a bug.
+    Nothing here ever submits an application; needs_review means a human decides.
+    """
+    from collections import Counter
+
+    from .jobs import load_store
+    from .scoring import score_job
+
+    prefs = get_preferences()
+    if source == "eval":
+        from .evaluate import run_eval
+
+        report = run_eval(prefs=prefs)
+        return {
+            "source": "eval",
+            "total": report["total"],
+            "accuracy": report["accuracy"],
+            "mismatches": report["mismatches"],
+            "verdicts": dict(Counter(r["got"] for r in report["rows"])),
+        }
+    if source == "store":
+        rows = [
+            {"id": j.get("id"), "company": j.get("company"),
+             **score_job(j, prefs).to_dict()}
+            for j in load_store()
+        ]
+        return {"source": "store", "scored": len(rows),
+                "verdicts": dict(Counter(r["verdict"] for r in rows)), "rows": rows}
+    raise ValueError(f"unknown source: {source} (use 'eval' or 'store')")
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
     "estimate_cost": estimate_cost,
     "fetch_jobs": fetch_jobs,
+    "score_jobs": score_jobs,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -113,6 +152,17 @@ TOOL_SCHEMAS = [
             "properties": {
                 "source": {"type": "string", "enum": ["sample", "greenhouse"], "description": "Where to fetch jobs from"},
                 "board": {"type": "string", "description": "Greenhouse board token, required when source='greenhouse'"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "score_jobs",
+        "description": "Score job postings against the user's criteria using hard rules first, then structured scoring, downgrading low-confidence results to needs_review for human decision. Use source='eval' to run the labelled evaluation set and report accuracy, or source='store' to score jobs already stored in data/jobs.json. Never submits an application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["eval", "store"], "description": "Which jobs to score: the labelled eval set, or the stored jobs"},
             },
             "required": [],
         },
