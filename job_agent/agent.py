@@ -31,6 +31,8 @@ def _mock_decide(user_text: str):
     numbers = [int(n) for n in re.findall(r"\d+", text)]
     if "fetch" in text or "抓" in user_text or "搜岗" in user_text or "拉取" in user_text:
         return "fetch_jobs", {"source": "sample"}
+    if "material" in text or "材料" in user_text or "申请要点" in user_text or "定制" in user_text:
+        return "draft_materials", {"source": "eval"}
     if "score" in text or "eval" in text or "评分" in user_text or "匹配" in user_text:
         return "score_jobs", {"source": "eval"}
     if "cost" in text or "成本" in user_text or "多少钱" in user_text:

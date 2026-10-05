@@ -115,12 +115,40 @@ def score_jobs(source: str = "eval") -> dict:
     raise ValueError(f"unknown source: {source} (use 'eval' or 'store')")
 
 
+def draft_materials(source: str = "eval", case_id: str = "") -> dict:
+    """Milestone 4 tool: RAG-tailored application points from the resume.
+
+    source='eval' (no case_id) -> run the cheap-vs-strong extraction-tier
+    comparison over data/eval_materials.json and report recall / gaps /
+    grounded rate / cost per grounded point for each tier.
+    case_id='eval-m01' etc. -> generate one draft for that labelled case:
+    points grounded in resume chunks + explicit gaps. Draft only —
+    a human reviews and approves before anything is ever submitted.
+    """
+    from .evaluate import load_material_cases, run_materials_eval
+    from .materials import generate_materials
+
+    if case_id:
+        cases = {c["id"]: c for c in load_material_cases()}
+        if case_id not in cases:
+            raise ValueError(f"unknown case_id: {case_id} (have {sorted(cases)})")
+        case = cases[case_id]
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        draft = generate_materials(job)
+        return {"case_id": case_id, **draft}
+    if source == "eval":
+        return {"source": "eval", **run_materials_eval()}
+    raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
     "estimate_cost": estimate_cost,
     "fetch_jobs": fetch_jobs,
     "score_jobs": score_jobs,
+    "draft_materials": draft_materials,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -163,6 +191,18 @@ TOOL_SCHEMAS = [
             "type": "object",
             "properties": {
                 "source": {"type": "string", "enum": ["eval", "store"], "description": "Which jobs to score: the labelled eval set, or the stored jobs"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "draft_materials",
+        "description": "Draft tailored application points for a job, grounded only in retrieved resume chunks (RAG): every point cites its resume evidence, and requirements with no resume evidence are reported as gaps instead of being invented. With source='eval' and no case_id, compares cheap vs strong extraction tiers (recall, gap accuracy, grounded rate, cost per grounded point). With a case_id like 'eval-m01', generates one draft. Drafts only — never submits an application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the tier-comparison evaluation set"},
+                "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m01') to generate a single draft for"},
             },
             "required": [],
         },
