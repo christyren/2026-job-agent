@@ -142,6 +142,29 @@ def draft_materials(source: str = "eval", case_id: str = "") -> dict:
     raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
 
 
+def track_applications(action: str = "summary", app_id: str = "",
+                         to: str = "", note: str = "") -> dict:
+    """Milestone 5 tool: application tracking over the durable store.
+
+    action='summary'    -> daily summary (counts, needs_review, stale,
+                           interview list, one-line cost accounting).
+    action='transition' -> move one application along a legal FSM edge
+                           (app_id + to required); illegal moves raise.
+    State lives in data/applications.json and is re-read from disk on
+    every call — the agent's memory is never the source of truth.
+    Nothing here submits or withdraws anything in the real world.
+    """
+    from .tracking import daily_summary, transition_in_store
+
+    if action == "summary":
+        return daily_summary()
+    if action == "transition":
+        if not app_id or not to:
+            raise ValueError("transition needs app_id and to")
+        return transition_in_store(app_id, to, note=note)
+    raise ValueError(f"unknown action: {action} (use 'summary' or 'transition')")
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
@@ -149,6 +172,7 @@ TOOL_FUNCTIONS = {
     "fetch_jobs": fetch_jobs,
     "score_jobs": score_jobs,
     "draft_materials": draft_materials,
+    "track_applications": track_applications,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -191,6 +215,20 @@ TOOL_SCHEMAS = [
             "type": "object",
             "properties": {
                 "source": {"type": "string", "enum": ["eval", "store"], "description": "Which jobs to score: the labelled eval set, or the stored jobs"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "track_applications",
+        "description": "Track job applications in the durable store (data/applications.json) using a finite state machine. Use action='summary' for the daily summary: counts by status, applications parked in needs_review for a human, stale applied/replied applications, interviews in progress, and a one-line tasks/steps/cost accounting that flags over-cap runs for human review. Use action='transition' with app_id and to to record a legal status move; illegal moves are refused. Never submits or withdraws an application in the real world.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["summary", "transition"], "description": "What to do: daily summary, or record one status transition"},
+                "app_id": {"type": "string", "description": "Application id, required for action='transition'"},
+                "to": {"type": "string", "description": "New status, required for action='transition'"},
+                "note": {"type": "string", "description": "Optional note stored in the transition history"},
             },
             "required": [],
         },

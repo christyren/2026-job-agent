@@ -29,6 +29,8 @@ def _mock_decide(user_text: str):
     """
     text = user_text.lower()
     numbers = [int(n) for n in re.findall(r"\d+", text)]
+    if "track" in text or "summary" in text or "跟踪" in user_text or "进度" in user_text or "汇总" in user_text:
+        return "track_applications", {"action": "summary"}
     if "fetch" in text or "抓" in user_text or "搜岗" in user_text or "拉取" in user_text:
         return "fetch_jobs", {"source": "sample"}
     if "material" in text or "材料" in user_text or "申请要点" in user_text or "定制" in user_text:
