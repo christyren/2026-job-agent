@@ -106,6 +106,41 @@ def run_materials_eval(cases: list[dict] | None = None) -> dict:
     return {"cases": len(cases), "tiers": tiers}
 
 
+def load_planner_cases(path: Path = DATA_DIR / "eval_planner.json") -> list[dict]:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def run_planner_eval(cases: list[dict] | None = None) -> dict:
+    """Milestone 6 eval: labelled scenarios for the planner.
+
+    Each case is a snapshot (apps + memory + fixed 'today') with the
+    expected TOP action after thresholding. We check the top action
+    only — the plan is ordered, so position 1 is the decision that
+    would actually drive the morning. A case flipping is a real signal
+    (e.g. plan-05 must stay needs_review: memory is pausing that
+    company, and a planner that 'forgets' it fails here first).
+    """
+    from .planning import plan_today
+
+    cases = cases if cases is not None else load_planner_cases()
+    rows = []
+    correct = 0
+    for case in cases:
+        plan = plan_today(apps=case["apps"], today=case["today"],
+                          memory_entries=case.get("memory_entries", []))
+        top = plan[0] if plan else {"action": "wait", "confidence": 0.0}
+        ok = top["action"] == case["expected_top_action"]
+        correct += int(ok)
+        rows.append({"id": case["id"], "expected": case["expected_top_action"],
+                     "got": top["action"], "confidence": top["confidence"],
+                     "ok": ok})
+    total = len(cases)
+    return {"total": total, "correct": correct,
+            "accuracy": round(correct / total, 3) if total else 0.0,
+            "mismatches": [r for r in rows if not r["ok"]], "rows": rows}
+
+
 if __name__ == "__main__":
     report = run_eval()
     for r in report["rows"]:
@@ -119,3 +154,9 @@ if __name__ == "__main__":
         print(f"{tier}: recall={t['requirement_recall']:.0%} gap_accuracy={t['gap_accuracy']:.0%} "
               f"grounded={t['grounded_rate']:.0%} cost=${t['total_cost_usd']} "
               f"per_point=${t['cost_per_grounded_point_usd']}")
+    print("\n--- milestone 6: planner eval ---")
+    p = run_planner_eval()
+    for r in p["rows"]:
+        mark = "OK " if r["ok"] else "MISS"
+        print(f"{mark} {r['id']}: expected={r['expected']} got={r['got']} conf={r['confidence']}")
+    print(f"planner accuracy: {p['correct']}/{p['total']} = {p['accuracy']:.0%}")

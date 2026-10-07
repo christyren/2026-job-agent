@@ -165,6 +165,27 @@ def track_applications(action: str = "summary", app_id: str = "",
     raise ValueError(f"unknown action: {action} (use 'summary' or 'transition')")
 
 
+def plan_today() -> dict:
+    """Milestone 6 tool: build today's ordered plan (typed decisions).
+
+    Reads the durable application store (milestone 5) plus long-term
+    memory (data/agent_memory.json) from disk on every call, emits an
+    ordered list of typed decisions, and downgrades any decision with
+    confidence < 0.7 to needs_review for a human. The planner only
+    PROPOSES — it executes nothing and never submits anything.
+    """
+    from .planning import load_memory, plan_today as _build_plan
+
+    plan = _build_plan()
+    return {
+        "decisions": plan,
+        "top_action": plan[0]["action"] if plan else "wait",
+        "needs_human_count": sum(1 for d in plan if d["requires_human"]),
+        "memory_entries_used": len(load_memory()),
+        "store": "data/applications.json + data/agent_memory.json",
+    }
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
@@ -173,6 +194,7 @@ TOOL_FUNCTIONS = {
     "score_jobs": score_jobs,
     "draft_materials": draft_materials,
     "track_applications": track_applications,
+    "plan_today": plan_today,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -232,6 +254,11 @@ TOOL_SCHEMAS = [
             },
             "required": [],
         },
+    },
+    {
+        "name": "plan_today",
+        "description": "Build today's ordered action plan for the job search as typed decisions (action enum + target + confidence + reasons). Reads the durable application store and long-term memory (human decisions that still bind, e.g. paused companies) from disk; decisions below 0.7 confidence are returned as needs_review for a human. Use when the user asks what to do next, for today's plan, or for priorities. Proposes only — never executes, submits, or messages anyone.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "draft_materials",
