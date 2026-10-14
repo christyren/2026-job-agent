@@ -1,0 +1,60 @@
+{
+  "snapshot_version": 1,
+  "date": "2026-10-14",
+  "departure_date": "2026-10-15",
+  "note": "Departure checkpoint — read-only view at creation. Live stores stay authoritative; reconcile any drift, do not silently overwrite either side.",
+  "applications": {
+    "total": 4,
+    "by_status": {
+      "materials_ready": 1,
+      "interview": 1,
+      "applied": 1,
+      "needs_review": 1
+    },
+    "needs_review": [
+      {
+        "id": "app:review-demo",
+        "company": "Northwind"
+      }
+    ],
+    "stale": [
+      {
+        "id": "app:stale-demo",
+        "company": "DataFlow",
+        "status": "applied",
+        "days": 16
+      }
+    ],
+    "in_interview": [
+      {
+        "id": "app:snowflake-backend",
+        "company": "Snowflake"
+      }
+    ]
+  },
+  "verifications": {
+    "total": 3,
+    "by_status": {
+      "unknown": 1,
+      "refuted": 1,
+      "confirmed": 1
+    },
+    "unknown": [
+      {
+        "id": "stripe-oa-submission",
+        "question": "Stripe HackerRank OA 到底提交成功了吗？"
+      }
+    ]
+  },
+  "paused_companies": [
+    "snowflake"
+  ],
+  "memory_entries": 3,
+  "resume_actions": [
+    "先核实 unknown（1 条）：stripe-oa-submission — 没有新证据前不许改成 confirmed / refuted，时间过去不算证据",
+    "清 needs_review（1 条）：停车位只能由人清，planner 不能代清",
+    "跟进 stale（1 条）：先确认还值不值得跟，再决定跟不跟，不要回来第一天就群发",
+    "面试中（1 条）：先看邮箱有没有新进展，状态变了先入台账、再改 applications.json"
+  ],
+  "needs_human_on_resume": true
+}
