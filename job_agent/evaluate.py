@@ -141,6 +141,46 @@ def run_planner_eval(cases: list[dict] | None = None) -> dict:
             "mismatches": [r for r in rows if not r["ok"]], "rows": rows}
 
 
+def load_decisions_cases(path: Path = DATA_DIR / "eval_decisions.json") -> list[dict]:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def run_decisions_eval(cases: list[dict] | None = None) -> dict:
+    """Iteration 2026-11-12 eval: planner -> Decisions-API batch.
+
+    Each case is a snapshot (apps + memory + fixed 'today') with the
+    expected TOP choice, its confidence, the batch score question's value,
+    and the total question count (2 per decision + 1 batch score).
+    A case flips only if the mapping itself is wrong — the planner eval
+    already covers the underlying decisions, this one covers the shape
+    (noul/choice/score) they are packed into.
+    """
+    from .decisions import build_decisions_batch
+
+    cases = cases if cases is not None else load_decisions_cases()
+    rows = []
+    correct = 0
+    for case in cases:
+        report = build_decisions_batch(apps=case["apps"], today=case["today"],
+                                       memory_entries=case.get("memory_entries", []))
+        choices = [q for q in report["questions"] if q["question_type"] == "choice"]
+        top = choices[0] if choices else {"chosen": "wait", "confidence": 0.0}
+        ok = (top["chosen"] == case["expected_top_chosen"]
+              and top["confidence"] == case["expected_top_confidence"]
+              and report["plan_score"] == case["expected_plan_score"]
+              and report["num_questions"] == case["expected_num_questions"])
+        correct += int(ok)
+        rows.append({"id": case["id"], "expected": case["expected_top_chosen"],
+                     "got": top["chosen"], "confidence": top["confidence"],
+                     "plan_score": report["plan_score"],
+                     "num_questions": report["num_questions"], "ok": ok})
+    total = len(cases)
+    return {"total": total, "correct": correct,
+            "accuracy": round(correct / total, 3) if total else 0.0,
+            "mismatches": [r for r in rows if not r["ok"]], "rows": rows}
+
+
 if __name__ == "__main__":
     report = run_eval()
     for r in report["rows"]:
@@ -160,3 +200,10 @@ if __name__ == "__main__":
         mark = "OK " if r["ok"] else "MISS"
         print(f"{mark} {r['id']}: expected={r['expected']} got={r['got']} conf={r['confidence']}")
     print(f"planner accuracy: {p['correct']}/{p['total']} = {p['accuracy']:.0%}")
+    print("\n--- iteration 2026-11-12: decisions batch eval ---")
+    d = run_decisions_eval()
+    for r in d["rows"]:
+        mark = "OK " if r["ok"] else "MISS"
+        print(f"{mark} {r['id']}: expected={r['expected']} got={r['got']} conf={r['confidence']} "
+              f"plan_score={r['plan_score']} questions={r['num_questions']}")
+    print(f"decisions accuracy: {d['correct']}/{d['total']} = {d['accuracy']:.0%}")

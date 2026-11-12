@@ -186,6 +186,21 @@ def plan_today() -> dict:
     }
 
 
+def typed_decisions() -> dict:
+    """Iteration 2026-11-12 tool: today's plan as a Decisions-API batch.
+
+    Same durable inputs as plan_today (applications + long-term memory),
+    repacked as typed questions: one `choice` (pick the next action from
+    the 8 planner actions) + one `noul` (P(can it auto-execute?) =
+    confidence) per decision, plus one batch `score` grading the whole
+    plan. Includes the batch cost estimate (shared input billed once,
+    output $0). Proposes only — never executes, submits, or messages.
+    """
+    from .decisions import build_decisions_batch
+
+    return build_decisions_batch()
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
@@ -195,6 +210,7 @@ TOOL_FUNCTIONS = {
     "draft_materials": draft_materials,
     "track_applications": track_applications,
     "plan_today": plan_today,
+    "typed_decisions": typed_decisions,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -271,6 +287,11 @@ TOOL_SCHEMAS = [
             },
             "required": [],
         },
+    },
+    {
+        "name": "typed_decisions",
+        "description": "Return today's job-search plan as a batch of typed decisions in the Gemini Decisions API shape: one 'choice' question per application (pick the next action from the 8 planner actions, every option scored), one 'noul' yes/no question per decision (probability it can auto-execute, equal to its confidence), and one batch 'score' grading the whole plan, plus the batch cost estimate (shared input billed once, output tokens free). Use when the user asks for today's decisions, the typed plan, or the batch cost. Proposes only — never executes, submits, or messages anyone.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
 ]
 
