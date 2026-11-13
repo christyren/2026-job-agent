@@ -29,6 +29,8 @@ def _mock_decide(user_text: str):
     """
     text = user_text.lower()
     numbers = [int(n) for n in re.findall(r"\d+", text)]
+    if "批量评分" in user_text or "批量打分" in user_text or "batch scor" in text:
+        return "score_jobs_batch", {"source": "eval"}
     if "decision" in text or "决策" in user_text or "类型化" in user_text or "批量" in user_text:
         return "typed_decisions", {}
     if "plan" in text or "规划" in user_text or "下一步" in user_text or "今日计划" in user_text:

@@ -181,6 +181,41 @@ def run_decisions_eval(cases: list[dict] | None = None) -> dict:
             "mismatches": [r for r in rows if not r["ok"]], "rows": rows}
 
 
+def run_batch_scoring_eval(cases: list[dict] | None = None,
+                           prefs: dict | None = None) -> dict:
+    """Iteration 2026-11-13 eval: the same 10 labelled jobs, as one batch.
+
+    The batch must give the SAME verdicts as one-by-one scoring
+    (run_eval) — batching changes the packaging and the price, never
+    the decision. Each row checks the choice question's winner
+    against the labelled verdict, plus the batch cost saving.
+    """
+    from .batch_scoring import score_jobs_batch
+
+    cases = cases if cases is not None else load_eval_cases()
+    prefs = prefs if prefs is not None else get_preferences()
+    jobs = [{k: v for k, v in c.items() if k not in ("expected_verdict", "note")}
+            for c in cases]
+    report = score_jobs_batch(jobs, prefs)
+    rows = []
+    correct = 0
+    for case, result in zip(cases, report["results"]):
+        ok = result["verdict"] == case["expected_verdict"]
+        correct += int(ok)
+        rows.append({"id": case.get("id", "?"), "company": case.get("company", "?"),
+                     "expected": case["expected_verdict"], "got": result["verdict"],
+                     "confidence": result["confidence"], "ok": ok})
+    total = len(cases)
+    return {"total": total, "correct": correct,
+            "accuracy": round(correct / total, 3) if total else 0.0,
+            "mismatches": [r for r in rows if not r["ok"]], "rows": rows,
+            "num_questions": report["num_questions"],
+            "batch_score": report["batch_score"],
+            "batch_cost_usd": report["cost"]["estimated_cost_usd"],
+            "per_job_cost_usd": report["per_job_cost"]["estimated_cost_usd"],
+            "saving_factor": report["saving_factor"]}
+
+
 if __name__ == "__main__":
     report = run_eval()
     for r in report["rows"]:
@@ -207,3 +242,12 @@ if __name__ == "__main__":
         print(f"{mark} {r['id']}: expected={r['expected']} got={r['got']} conf={r['confidence']} "
               f"plan_score={r['plan_score']} questions={r['num_questions']}")
     print(f"decisions accuracy: {d['correct']}/{d['total']} = {d['accuracy']:.0%}")
+    print("\n--- iteration 2026-11-13: batch scoring eval ---")
+    b = run_batch_scoring_eval()
+    for r in b["rows"]:
+        mark = "OK " if r["ok"] else "MISS"
+        print(f"{mark} {r['id']}: expected={r['expected']} got={r['got']} conf={r['confidence']}")
+    print(f"batch scoring accuracy: {b['correct']}/{b['total']} = {b['accuracy']:.0%} "
+          f"questions={b['num_questions']} batch_score={b['batch_score']} "
+          f"batch_cost=${b['batch_cost_usd']} vs per-job ${b['per_job_cost_usd']} "
+          f"(saving ~{b['saving_factor']}x)")

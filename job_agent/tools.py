@@ -201,6 +201,23 @@ def typed_decisions() -> dict:
     return build_decisions_batch()
 
 
+def score_jobs_batch(source: str = "eval") -> dict:
+    """Iteration 2026-11-13 tool: score many jobs as ONE batch.
+
+    Same pipeline as score_jobs (hard rules -> structured scorer ->
+    threshold), but the jobs are packed into one Decisions-API-shaped
+    batch: one `choice` question per job (verdict = match / no_match /
+    needs_review, winner = final verdict, score = confidence) plus
+    one batch `score` (mean confidence). The report also shows the
+    cost of the batch vs one LLM call per job — batching bills the
+    shared input (preferences + criteria) once instead of once per
+    job. Scores only — never submits an application.
+    """
+    from .batch_scoring import build_batch_from_source
+
+    return build_batch_from_source(source)
+
+
 # Registry: name -> python function. The agent loop dispatches through this dict.
 TOOL_FUNCTIONS = {
     "get_preferences": get_preferences,
@@ -211,6 +228,7 @@ TOOL_FUNCTIONS = {
     "track_applications": track_applications,
     "plan_today": plan_today,
     "typed_decisions": typed_decisions,
+    "score_jobs_batch": score_jobs_batch,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -292,6 +310,17 @@ TOOL_SCHEMAS = [
         "name": "typed_decisions",
         "description": "Return today's job-search plan as a batch of typed decisions in the Gemini Decisions API shape: one 'choice' question per application (pick the next action from the 8 planner actions, every option scored), one 'noul' yes/no question per decision (probability it can auto-execute, equal to its confidence), and one batch 'score' grading the whole plan, plus the batch cost estimate (shared input billed once, output tokens free). Use when the user asks for today's decisions, the typed plan, or the batch cost. Proposes only — never executes, submits, or messages anyone.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "score_jobs_batch",
+        "description": "Score many job postings as ONE batch of typed choice questions (Decisions-API shape): one 'choice' question per job (verdict = match / no_match / needs_review, winner = the pipeline's final verdict after hard rules and the confidence threshold, score = confidence), plus one batch 'score' (mean confidence). The report also compares the batch cost against one LLM call per job — the shared input (criteria) is billed once per batch instead of once per job. Use source='eval' for the labelled evaluation set or 'store' for jobs in data/jobs.json. Use when the user asks to batch-score jobs or compare batch vs per-job cost. Scores only — never submits an application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["eval", "store"], "description": "Which jobs to batch-score: the labelled eval set, or the stored jobs"},
+            },
+            "required": [],
+        },
     },
 ]
 
