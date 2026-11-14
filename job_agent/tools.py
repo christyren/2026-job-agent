@@ -115,15 +115,19 @@ def score_jobs(source: str = "eval") -> dict:
     raise ValueError(f"unknown source: {source} (use 'eval' or 'store')")
 
 
-def draft_materials(source: str = "eval", case_id: str = "") -> dict:
+def draft_materials(source: str = "eval", case_id: str = "",
+                    extract_tier: str = "cheap") -> dict:
     """Milestone 4 tool: RAG-tailored application points from the resume.
 
-    source='eval' (no case_id) -> run the cheap-vs-strong extraction-tier
+    source='eval' (no case_id) -> run the cheap/mid/strong extraction-tier
     comparison over data/eval_materials.json and report recall / gaps /
     grounded rate / cost per grounded point for each tier.
     case_id='eval-m01' etc. -> generate one draft for that labelled case:
-    points grounded in resume chunks + explicit gaps. Draft only —
-    a human reviews and approves before anything is ever submitted.
+    points grounded in resume chunks + explicit gaps. extract_tier picks
+    the extraction tier for the single draft ('cheap' default, 'mid' =
+    Gemini 4 Hydrogen-class fast executor, 'strong' = full synonyms).
+    Draft only — a human reviews and approves before anything is ever
+    submitted.
     """
     from .evaluate import load_material_cases, run_materials_eval
     from .materials import generate_materials
@@ -135,7 +139,7 @@ def draft_materials(source: str = "eval", case_id: str = "") -> dict:
         case = cases[case_id]
         job = {k: v for k, v in case.items()
                if k not in ("expected_requirements", "expected_gaps", "note")}
-        draft = generate_materials(job)
+        draft = generate_materials(job, extract_tier=extract_tier)
         return {"case_id": case_id, **draft}
     if source == "eval":
         return {"source": "eval", **run_materials_eval()}
@@ -296,12 +300,13 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "draft_materials",
-        "description": "Draft tailored application points for a job, grounded only in retrieved resume chunks (RAG): every point cites its resume evidence, and requirements with no resume evidence are reported as gaps instead of being invented. With source='eval' and no case_id, compares cheap vs strong extraction tiers (recall, gap accuracy, grounded rate, cost per grounded point). With a case_id like 'eval-m01', generates one draft. Drafts only — never submits an application.",
+        "description": "Draft tailored application points for a job, grounded only in retrieved resume chunks (RAG): every point cites its resume evidence, and requirements with no resume evidence are reported as gaps instead of being invented. With source='eval' and no case_id, compares cheap vs mid vs strong extraction tiers (recall, gap accuracy, grounded rate, cost per grounded point). With a case_id like 'eval-m01', generates one draft; extract_tier picks its extraction tier ('cheap', 'mid', or 'strong'). Drafts only — never submits an application.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the tier-comparison evaluation set"},
                 "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m01') to generate a single draft for"},
+                "extract_tier": {"type": "string", "enum": ["cheap", "mid", "strong"], "description": "Extraction tier for a single draft: 'cheap' (exact hits only), 'mid' (common paraphrases), 'strong' (full synonyms)"},
             },
             "required": [],
         },

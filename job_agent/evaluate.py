@@ -59,15 +59,17 @@ def load_material_cases(path: Path = DATA_DIR / "eval_materials.json") -> list[d
 
 
 def run_materials_eval(cases: list[dict] | None = None) -> dict:
-    """Milestone 4 eval: same labelled cases, two extraction tiers.
+    """Milestone 4 eval: same labelled cases, three extraction tiers.
 
     Per tier we measure what routing actually trades off:
     - requirement_recall: expected requirements the extractor found.
       A missed requirement is the worst failure here — it silently
       produces neither a point nor a gap, so nobody ever reviews it.
     - gap_accuracy: cases where generated gaps == labelled expected_gaps.
+      Note it can stay 1.0 while recall is bad: a missed requirement
+      never enters gaps at all, so only recall sees a silent miss.
     - grounded_rate: share of generated points passing verify_grounding
-      (must be 1.0 on both tiers — routing must never buy recall with
+      (must be 1.0 on all tiers — routing must never buy recall with
       fabricated evidence).
     - total_cost_usd / cost_per_grounded_point from the token logs.
     """
@@ -76,7 +78,7 @@ def run_materials_eval(cases: list[dict] | None = None) -> dict:
     cases = cases if cases is not None else load_material_cases()
     chunks = load_resume_chunks()
     tiers: dict[str, dict] = {}
-    for tier in ("cheap", "strong"):
+    for tier in ("cheap", "mid", "strong"):
         found_total, expected_total, gap_ok = 0, 0, 0
         grounded, points_total, cost = 0, 0, 0.0
         rows = []
@@ -223,7 +225,7 @@ if __name__ == "__main__":
         print(f"{mark} {r['id']} {r['company']}: expected={r['expected']} got={r['got']} "
               f"conf={r['confidence']} hard={r['hard_filter_failed']}")
     print(f"\naccuracy: {report['correct']}/{report['total']} = {report['accuracy']:.0%}")
-    print("\n--- milestone 4: materials eval (cheap vs strong extraction) ---")
+    print("\n--- milestone 4: materials eval (cheap vs mid vs strong extraction) ---")
     m = run_materials_eval()
     for tier, t in m["tiers"].items():
         print(f"{tier}: recall={t['requirement_recall']:.0%} gap_accuracy={t['gap_accuracy']:.0%} "

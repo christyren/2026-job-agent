@@ -2,11 +2,12 @@
 model routing (cheap extraction / strong generation), step cap + token log.
 
 Pipeline (the order is the lesson, again):
-1. EXTRACT (cheap tier). Pull the JD's requirements out as a list.
+1. EXTRACT (routed tier). Pull the JD's requirements out as a list.
    This is classification/extraction: bounded, repetitive, verifiable —
    exactly the work a cheap model is good enough for. Offline we simulate
-   two tiers: cheap = exact keyword hits only; strong = exact hits PLUS
-   a synonym map ("event streaming" -> Kafka). The eval below measures
+   three tiers: cheap = exact keyword hits only; mid = exact hits PLUS
+   the three most common paraphrases; strong = exact hits PLUS the full
+   synonym map ("event streaming" -> Kafka). The eval below measures
    the recall gap instead of us guessing which tier is "good enough".
 2. RETRIEVE (no LLM at all). For each requirement, find resume chunks
    whose keyword list covers it. This is the R in RAG: the facts come
@@ -46,6 +47,18 @@ MODEL_TIERS = {
         "input_price_per_million": 1.0,   # teaching example, re-check vendor page
         "output_price_per_million": 5.0,  # teaching example, re-check vendor page
     },
+    # Iteration 2026-11-14: the middle tier. Gemini 4 Hydrogen (2026-11-12)
+    # is Google's fast executor tier: $1.50 in / $7.50 out per million
+    # tokens, flat across the whole 1M-token context window, 2.5x faster
+    # than Gemini 3.8 Flash, and in Cursor + Devin on launch day.
+    # It sits between cheap and strong on price — the question this
+    # iteration answers is whether it also sits between them on recall,
+    # and what that middle is actually worth per grounded point.
+    "mid": {  # fast executor tier: common paraphrases, not the rare ones
+        "model_example": "Gemini 4 Hydrogen (fast executor tier)",
+        "input_price_per_million": 1.5,   # Google blog 2026-11-12, flat over 1M ctx
+        "output_price_per_million": 7.5,  # same source
+    },
     "strong": {  # generation / ambiguous reasoning
         "model_example": "large model (e.g. Opus-class)",
         "input_price_per_million": 5.0,   # teaching example, re-check vendor page
@@ -74,6 +87,18 @@ SYNONYM_MAP = {
     "containerization": "Docker",
     "containerised": "Docker",
     "decoupled services": "microservices",
+}
+# Mid tier only: the three most common paraphrases — a strict subset of
+# SYNONYM_MAP. The mid tier is "cheap + the paraphrases you see every
+# day"; the rarer ones (message queue / stream processing / decoupled
+# services / containerised ...) stay strong-only. That is the whole
+# bet of a middle tier: most JDs phrase things the common way, so most
+# of the recall gain is already in these three lines — and the eval
+# below measures exactly how much of the gap they close.
+MID_SYNONYM_MAP = {
+    "event streaming": "Kafka",
+    "api design": "REST API",
+    "relational database": "SQL",
 }
 
 MATERIAL_SCHEMA = {
@@ -161,8 +186,10 @@ def retrieve(requirement: str, chunks: list[ResumeChunk]) -> ResumeChunk | None:
 # ---------------------------------------------------------------- extraction
 def extract_requirements(job: dict, tier: str = "cheap") -> list[str]:
     """Pull requirements from the JD text. tier='cheap': exact vocab hits
-    only. tier='strong': also resolves synonyms. Order follows the vocab
-    list so results are deterministic and diff-able in eval."""
+    only. tier='mid': exact hits PLUS the three common paraphrases in
+    MID_SYNONYM_MAP. tier='strong': exact hits PLUS the full SYNONYM_MAP.
+    Order follows the vocab list so results are deterministic and
+    diff-able in eval."""
     if tier not in MODEL_TIERS:
         raise ValueError(f"unknown tier: {tier}")
     text = (str(job.get("title", "")) + " " + str(job.get("description", ""))).lower()
@@ -170,10 +197,10 @@ def extract_requirements(job: dict, tier: str = "cheap") -> list[str]:
     for term in REQUIREMENT_VOCAB:
         if term.lower() in text:
             found.append(term)
-    if tier == "strong":
-        for phrase, term in SYNONYM_MAP.items():
-            if phrase in text and term not in found:
-                found.append(term)
+    synonym_map = {"mid": MID_SYNONYM_MAP, "strong": SYNONYM_MAP}.get(tier, {})
+    for phrase, term in synonym_map.items():
+        if phrase in text and term not in found:
+            found.append(term)
     return found
 
 
@@ -214,10 +241,11 @@ def generate_materials(job: dict, chunks: list[ResumeChunk] | None = None,
     budget = budget if budget is not None else RunBudget()
     jd_text = str(job.get("description", ""))
 
-    # Step 1 (routed tier): extraction
+    # Step 1 (routed tier): extraction. The budget must log the tier that
+    # actually ran — earlier code logged "strong" for anything not cheap,
+    # which would have billed the new mid tier at strong prices.
     requirements = extract_requirements(job, tier=extract_tier)
-    budget.step("extract_requirements", TASK_ROUTING["extract_requirements"]
-                if extract_tier == "cheap" else "strong",
+    budget.step("extract_requirements", extract_tier,
                 jd_text, json.dumps(requirements))
 
     # Step 2 (no LLM): retrieval + grounded generation.

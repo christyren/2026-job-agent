@@ -108,7 +108,9 @@ class TestRoutingAndBudget(unittest.TestCase):
 class TestMaterialsEval(unittest.TestCase):
     def test_eval_cases_are_labelled(self):
         cases = load_material_cases()
-        self.assertEqual(len(cases), 4)
+        # 5 since 2026-11-14: eval-m05 (rare paraphrases only) separates
+        # the new mid tier from strong.
+        self.assertEqual(len(cases), 5)
         self.assertTrue(all("expected_requirements" in c and "expected_gaps" in c
                             for c in cases))
 
