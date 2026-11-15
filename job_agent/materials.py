@@ -101,6 +101,17 @@ MID_SYNONYM_MAP = {
     "relational database": "SQL",
 }
 
+# Iteration 2026-11-15: cascade (FrugalGPT-style). Instead of picking ONE
+# tier up front, start cheap and escalate ONLY when the extraction looks
+# thin: fewer than MIN_REQUIREMENTS requirements found. The trigger is a
+# heuristic, not a proof — a JD can look fine (3 direct hits) and still
+# hide a paraphrase — so the threshold itself is a tunable parameter and
+# the eval below measures recall at MIN_REQUIREMENTS=3 vs 4. Tiers are
+# nested (cheap synonym map is a subset of mid's, which is a subset of
+# strong's), so escalating never LOSES a requirement already found.
+CASCADE_TIERS = ("cheap", "mid", "strong")
+MIN_REQUIREMENTS = 4  # escalate while fewer than this many requirements found
+
 MATERIAL_SCHEMA = {
     "type": "object",
     "properties": {
@@ -204,6 +215,28 @@ def extract_requirements(job: dict, tier: str = "cheap") -> list[str]:
     return found
 
 
+def extract_requirements_cascade(job: dict,
+                                 min_requirements: int = MIN_REQUIREMENTS) -> dict:
+    """Cascade extraction: try cheap first; while fewer than
+    min_requirements requirements are found and a stronger tier remains,
+    re-extract on the next tier. Returns the final requirements plus the
+    audit trail (which tiers ran, where it stopped, whether it escalated).
+    Every attempt is billed at its own tier's price — a cascade that
+    escalates twice pays for three extractions, which is exactly the
+    cost the eval has to weigh against the recall it buys."""
+    tiers_tried: list[str] = []
+    requirements: list[str] = []
+    for tier in CASCADE_TIERS:
+        requirements = extract_requirements(job, tier=tier)
+        tiers_tried.append(tier)
+        if len(requirements) >= min_requirements or tier == CASCADE_TIERS[-1]:
+            break
+    return {"requirements": requirements,
+            "tiers_tried": tiers_tried,
+            "final_tier": tiers_tried[-1],
+            "escalated": len(tiers_tried) > 1}
+
+
 # ---------------------------------------------------------------- generation
 def verify_grounding(points: list[dict], chunks: list[ResumeChunk]) -> list[dict]:
     """Deterministic faithfulness check: every point must cite a real chunk
@@ -232,22 +265,11 @@ def validate_materials(raw: dict) -> dict:
     return raw
 
 
-def generate_materials(job: dict, chunks: list[ResumeChunk] | None = None,
-                       extract_tier: str = "cheap",
-                       budget: RunBudget | None = None) -> dict:
-    """Full milestone-4 pipeline for one job. Returns the validated draft
-    plus the budget log (steps, tokens, cost) for inspection."""
-    chunks = chunks if chunks is not None else load_resume_chunks()
-    budget = budget if budget is not None else RunBudget()
-    jd_text = str(job.get("description", ""))
-
-    # Step 1 (routed tier): extraction. The budget must log the tier that
-    # actually ran — earlier code logged "strong" for anything not cheap,
-    # which would have billed the new mid tier at strong prices.
-    requirements = extract_requirements(job, tier=extract_tier)
-    budget.step("extract_requirements", extract_tier,
-                jd_text, json.dumps(requirements))
-
+def _finish_materials(job: dict, chunks: list[ResumeChunk],
+                      requirements: list[str], budget: RunBudget,
+                      extract_tier: str, cascade: dict | None = None) -> dict:
+    """Steps 2-3 shared by the fixed-tier and cascade pipelines:
+    retrieval + grounded generation, then the grounding veto."""
     # Step 2 (no LLM): retrieval + grounded generation.
     # Offline, the 'strong model' is simulated by composing each point
     # directly from the retrieved chunk text — which is also exactly the
@@ -276,8 +298,52 @@ def generate_materials(job: dict, chunks: list[ResumeChunk] | None = None,
 
     draft = validate_materials({
         "job_company": str(job.get("company", "?")), "points": points, "gaps": gaps})
-    return {**draft, "extract_tier": extract_tier,
-            "steps_used": budget.steps, "token_log": budget.log,
-            "total_cost_usd": budget.total_cost_usd,
-            "cost_per_grounded_point_usd": (
-                round(budget.total_cost_usd / len(points), 6) if points else None)}
+    result = {**draft, "extract_tier": extract_tier,
+              "steps_used": budget.steps, "token_log": budget.log,
+              "total_cost_usd": budget.total_cost_usd,
+              "cost_per_grounded_point_usd": (
+                  round(budget.total_cost_usd / len(points), 6) if points else None)}
+    if cascade is not None:
+        result["cascade"] = cascade
+    return result
+
+
+def generate_materials(job: dict, chunks: list[ResumeChunk] | None = None,
+                       extract_tier: str = "cheap",
+                       budget: RunBudget | None = None) -> dict:
+    """Full milestone-4 pipeline for one job. Returns the validated draft
+    plus the budget log (steps, tokens, cost) for inspection."""
+    chunks = chunks if chunks is not None else load_resume_chunks()
+    budget = budget if budget is not None else RunBudget()
+    jd_text = str(job.get("description", ""))
+
+    # Step 1 (routed tier): extraction. The budget must log the tier that
+    # actually ran — earlier code logged "strong" for anything not cheap,
+    # which would have billed the new mid tier at strong prices.
+    requirements = extract_requirements(job, tier=extract_tier)
+    budget.step("extract_requirements", extract_tier,
+                jd_text, json.dumps(requirements))
+
+    return _finish_materials(job, chunks, requirements, budget, extract_tier)
+
+
+def generate_materials_cascade(job: dict, chunks: list[ResumeChunk] | None = None,
+                               min_requirements: int = MIN_REQUIREMENTS,
+                               budget: RunBudget | None = None) -> dict:
+    """Cascade version of generate_materials: extraction escalates
+    cheap -> mid -> strong while fewer than min_requirements are found.
+    Each extraction attempt is its own budget step (worst case 3 extract
+    steps + generate + verify = 5, still inside MAX_STEPS_PER_TASK=6).
+    The draft carries the cascade audit trail so the eval — and a human —
+    can see exactly where it stopped and what the extra attempts cost."""
+    chunks = chunks if chunks is not None else load_resume_chunks()
+    budget = budget if budget is not None else RunBudget()
+    jd_text = str(job.get("description", ""))
+
+    cascade = extract_requirements_cascade(job, min_requirements=min_requirements)
+    for tier in cascade["tiers_tried"]:
+        budget.step("extract_requirements", tier,
+                    jd_text, json.dumps(extract_requirements(job, tier=tier)))
+
+    return _finish_materials(job, chunks, cascade["requirements"], budget,
+                             cascade["final_tier"], cascade=cascade)

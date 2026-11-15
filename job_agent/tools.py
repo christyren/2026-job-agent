@@ -146,6 +146,36 @@ def draft_materials(source: str = "eval", case_id: str = "",
     raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
 
 
+def draft_materials_cascade(source: str = "eval", case_id: str = "",
+                            min_requirements: int = 4) -> dict:
+    """Iteration 2026-11-15 tool: cascade extraction for materials.
+
+    source='eval' (no case_id) -> run the cascade eval over
+    data/eval_materials.json: recall / gap accuracy / grounded rate /
+    cost, plus per-case tiers tried and recall at min_requirements 3 vs 4.
+    case_id='eval-m01' etc. -> generate one draft with cascade
+    extraction (cheap first, escalate while fewer than min_requirements
+    found); the draft carries the cascade audit trail. Draft only —
+    a human reviews and approves before anything is ever submitted.
+    """
+    from .evaluate import load_material_cases, run_materials_cascade_eval
+    from .materials import generate_materials_cascade
+
+    if case_id:
+        cases = {c["id"]: c for c in load_material_cases()}
+        if case_id not in cases:
+            raise ValueError(f"unknown case_id: {case_id} (have {sorted(cases)})")
+        case = cases[case_id]
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        draft = generate_materials_cascade(job, min_requirements=min_requirements)
+        return {"case_id": case_id, **draft}
+    if source == "eval":
+        return {"source": "eval", **run_materials_cascade_eval(
+            min_requirements=min_requirements)}
+    raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
+
+
 def track_applications(action: str = "summary", app_id: str = "",
                          to: str = "", note: str = "") -> dict:
     """Milestone 5 tool: application tracking over the durable store.
@@ -233,6 +263,7 @@ TOOL_FUNCTIONS = {
     "plan_today": plan_today,
     "typed_decisions": typed_decisions,
     "score_jobs_batch": score_jobs_batch,
+    "draft_materials_cascade": draft_materials_cascade,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -307,6 +338,19 @@ TOOL_SCHEMAS = [
                 "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the tier-comparison evaluation set"},
                 "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m01') to generate a single draft for"},
                 "extract_tier": {"type": "string", "enum": ["cheap", "mid", "strong"], "description": "Extraction tier for a single draft: 'cheap' (exact hits only), 'mid' (common paraphrases), 'strong' (full synonyms)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "draft_materials_cascade",
+        "description": "Draft tailored application points using cascade extraction (FrugalGPT-style): start with the cheap extraction tier and escalate to mid, then strong, only while fewer than min_requirements requirements have been found. With source='eval' and no case_id, reports cascade recall, gap accuracy, grounded rate, cost, per-case tiers tried, and recall at min_requirements 3 vs 4. With a case_id like 'eval-m05', generates one draft carrying the cascade audit trail. Drafts only — never submits an application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the cascade evaluation set"},
+                "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m05') to generate a single draft for"},
+                "min_requirements": {"type": "integer", "description": "Escalate while fewer than this many requirements are found (default 4)"},
             },
             "required": [],
         },

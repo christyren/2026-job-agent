@@ -108,6 +108,70 @@ def run_materials_eval(cases: list[dict] | None = None) -> dict:
     return {"cases": len(cases), "tiers": tiers}
 
 
+def run_materials_cascade_eval(cases: list[dict] | None = None,
+                               min_requirements: int = 4) -> dict:
+    """Iteration 2026-11-15 eval: cascade extraction vs the fixed tiers.
+
+    Same labelled cases and same metrics as run_materials_eval (recall /
+    gap accuracy / grounded rate / cost), plus the cascade audit trail:
+    how many cases escalated, and which tier each case stopped at.
+    The threshold itself is measured, not assumed: `threshold_sensitivity`
+    reports recall at min_requirements=3 vs 4, because the trigger is a
+    heuristic — at 3, eval-m01 looks 'fine' (3 direct hits) and the
+    cascade stops before ever seeing Kafka / REST API.
+    """
+    from .materials import (MIN_REQUIREMENTS, extract_requirements_cascade,
+                            generate_materials_cascade, load_resume_chunks,
+                            verify_grounding)
+
+    cases = cases if cases is not None else load_material_cases()
+    chunks = load_resume_chunks()
+    found_total, expected_total, gap_ok = 0, 0, 0
+    grounded, points_total, cost = 0, 0, 0.0
+    escalated, rows = 0, []
+    for case in cases:
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        draft = generate_materials_cascade(job, chunks=chunks,
+                                           min_requirements=min_requirements)
+        extracted = [p["requirement"] for p in draft["points"]] + draft["gaps"]
+        missed = [r for r in case["expected_requirements"] if r not in extracted]
+        found_total += len(case["expected_requirements"]) - len(missed)
+        expected_total += len(case["expected_requirements"])
+        gap_ok += int(draft["gaps"] == case["expected_gaps"])
+        grounded += len(draft["points"]) - len(verify_grounding(draft["points"], chunks))
+        points_total += len(draft["points"])
+        cost += draft["total_cost_usd"]
+        escalated += int(draft["cascade"]["escalated"])
+        rows.append({"id": case["id"], "missed": missed,
+                     "tiers_tried": draft["cascade"]["tiers_tried"],
+                     "final_tier": draft["cascade"]["final_tier"],
+                     "points": len(draft["points"]),
+                     "cost_usd": draft["total_cost_usd"]})
+    sensitivity = {}
+    for threshold in (3, 4):
+        found = 0
+        for case in cases:
+            job = {k: v for k, v in case.items()
+                   if k not in ("expected_requirements", "expected_gaps", "note")}
+            got = extract_requirements_cascade(job, min_requirements=threshold)
+            found += sum(1 for r in case["expected_requirements"]
+                         if r in got["requirements"])
+        sensitivity[threshold] = round(found / expected_total, 3) if expected_total else 0.0
+    return {
+        "cases": len(cases),
+        "min_requirements": min_requirements,
+        "requirement_recall": round(found_total / expected_total, 3) if expected_total else 0.0,
+        "gap_accuracy": round(gap_ok / len(cases), 3) if cases else 0.0,
+        "grounded_rate": round(grounded / points_total, 3) if points_total else 1.0,
+        "total_cost_usd": round(cost, 6),
+        "cost_per_grounded_point_usd": round(cost / grounded, 6) if grounded else None,
+        "escalated_cases": escalated,
+        "threshold_sensitivity": sensitivity,
+        "rows": rows,
+    }
+
+
 def load_planner_cases(path: Path = DATA_DIR / "eval_planner.json") -> list[dict]:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -231,6 +295,19 @@ if __name__ == "__main__":
         print(f"{tier}: recall={t['requirement_recall']:.0%} gap_accuracy={t['gap_accuracy']:.0%} "
               f"grounded={t['grounded_rate']:.0%} cost=${t['total_cost_usd']} "
               f"per_point=${t['cost_per_grounded_point_usd']}")
+    print("\n--- iteration 2026-11-15: materials cascade eval ---")
+    c = run_materials_cascade_eval()
+    print(f"cascade (min_requirements={c['min_requirements']}): "
+          f"recall={c['requirement_recall']:.0%} gap_accuracy={c['gap_accuracy']:.0%} "
+          f"grounded={c['grounded_rate']:.0%} cost=${c['total_cost_usd']} "
+          f"per_point=${c['cost_per_grounded_point_usd']} "
+          f"escalated={c['escalated_cases']}/{c['cases']}")
+    for r in c["rows"]:
+        print(f"  {r['id']}: tiers={'+'.join(r['tiers_tried'])} "
+              f"missed={r['missed']} cost=${r['cost_usd']}")
+    print(f"threshold sensitivity (recall): min=3 -> {c['threshold_sensitivity'][3]:.0%}, "
+          f"min=4 -> {c['threshold_sensitivity'][4]:.0%}")
+
     print("\n--- milestone 6: planner eval ---")
     p = run_planner_eval()
     for r in p["rows"]:
