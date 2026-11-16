@@ -176,6 +176,39 @@ def draft_materials_cascade(source: str = "eval", case_id: str = "",
     raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
 
 
+def draft_materials_checked(source: str = "eval", case_id: str = "",
+                            min_requirements: int = 4) -> dict:
+    """Iteration 2026-11-16 tool: checked materials (solver / checker split).
+
+    source='eval' (no case_id) -> run the checker eval: baseline pass
+    rate on honest cascade drafts, detection + repair rates on 5
+    hand-built bad drafts (one per checker rule), and the full checked
+    pipeline (checker_passed rate, repairs used, steps vs the cap of 8,
+    total cost).
+    case_id='eval-m01' etc. -> generate one draft with cascade
+    extraction, then check it independently (5 rules), repair once if
+    it fails, and re-check; the draft carries the cascade audit trail,
+    the checker report, and any repairs. If it still fails, it comes
+    back flagged checker_passed=False + needs_human=True — never
+    silently shipped. Drafts only — never submits an application.
+    """
+    from .checker import generate_materials_checked
+    from .evaluate import load_material_cases, run_checker_eval
+
+    if case_id:
+        cases = {c["id"]: c for c in load_material_cases()}
+        if case_id not in cases:
+            raise ValueError(f"unknown case_id: {case_id} (have {sorted(cases)})")
+        case = cases[case_id]
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        draft = generate_materials_checked(job, min_requirements=min_requirements)
+        return {"case_id": case_id, **draft}
+    if source == "eval":
+        return {"source": "eval", **run_checker_eval()}
+    raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
+
+
 def track_applications(action: str = "summary", app_id: str = "",
                          to: str = "", note: str = "") -> dict:
     """Milestone 5 tool: application tracking over the durable store.
@@ -264,6 +297,7 @@ TOOL_FUNCTIONS = {
     "typed_decisions": typed_decisions,
     "score_jobs_batch": score_jobs_batch,
     "draft_materials_cascade": draft_materials_cascade,
+    "draft_materials_checked": draft_materials_checked,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -351,6 +385,19 @@ TOOL_SCHEMAS = [
                 "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the cascade evaluation set"},
                 "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m05') to generate a single draft for"},
                 "min_requirements": {"type": "integer", "description": "Escalate while fewer than this many requirements are found (default 4)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "draft_materials_checked",
+        "description": "Draft tailored application points with an independent checker step (solver / checker split): cascade extraction generates the draft, then a separate checker re-derives the JD requirements and resume evidence from the raw inputs and verifies 5 rules (requirement really in the JD, cited chunk covers the requirement, quote verbatim, gaps really lack evidence, no requirement silently dropped). On failure it repairs once from the checker's structured failure list and re-checks; a draft that still fails comes back flagged needs_human=True. With source='eval' and no case_id, reports baseline pass rate, detection and repair rates on 5 hand-built bad drafts, and checked-pipeline cost/steps. With a case_id like 'eval-m01', generates one checked draft. Drafts only — never submits an application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the checker evaluation set"},
+                "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m01') to generate a single checked draft for"},
+                "min_requirements": {"type": "integer", "description": "Cascade escalation threshold: escalate while fewer than this many requirements are found (default 4)"},
             },
             "required": [],
         },

@@ -172,6 +172,149 @@ def run_materials_cascade_eval(cases: list[dict] | None = None,
     }
 
 
+def build_adversarial_drafts(chunks=None) -> list[dict]:
+    """Iteration 2026-11-16: five hand-built BAD drafts, one per checker
+    rule, so the eval measures detection instead of assuming it.
+
+    All five start from the eval-m01 job (RoutingCloud: Java /
+    distributed systems / Kafka / REST API / AWS) and real resume
+    chunks — each draft breaks exactly one rule, so a checker that
+    passes it is provably blind to that failure mode.
+    """
+    from .materials import load_resume_chunks
+
+    chunks = chunks if chunks is not None else load_resume_chunks()
+    by_id = {c.id: c for c in chunks}
+    cases = {c["id"]: c for c in load_material_cases()}
+    job = {k: v for k, v in cases["eval-m01"].items()
+           if k not in ("expected_requirements", "expected_gaps", "note")}
+    skills = by_id["resume-skills"]
+    tesla = by_id["tesla-fullstack"]
+    spark_chunk = by_id["microsoft-data-ai"]
+
+    def point(req, chunk, quote=None):
+        return {"requirement": req, "evidence_chunk_id": chunk.id,
+                "evidence_quote": quote if quote is not None else chunk.text,
+                "point": f"For {req}: {chunk.text}"}
+
+    honest_points = [point(r, by_id["resume-skills"]) for r in
+                     ("Java", "distributed systems", "Kafka", "REST API", "AWS")]
+    return [
+        {"id": "adv-01-fabricated-quote", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": [point("Java", skills,
+                                    "10 years of Kafka experience leading platform teams")]
+                             + honest_points[1:],
+                   "gaps": []},
+         "expected_failing_check": "evidence_verbatim",
+         "note": "quote is invented, not in the cited chunk"},
+        {"id": "adv-02-requirement-not-in-jd", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": honest_points + [point("Spark", spark_chunk)],
+                   "gaps": []},
+         "expected_failing_check": "requirement_in_jd",
+         "note": "Spark is a real resume skill, but this JD never asks for it"},
+        {"id": "adv-03-wrong-chunk", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": [point("Java", skills),
+                              point("distributed systems", skills),
+                              point("Kafka", tesla),
+                              point("REST API", skills),
+                              point("AWS", skills)],
+                   "gaps": []},
+         "expected_failing_check": "evidence_supports_requirement",
+         "note": "real chunk + verbatim quote, but the chunk is about Tesla C#/SQL, not Kafka"},
+        {"id": "adv-04-fake-gap", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": [p for p in honest_points if p["requirement"] != "Kafka"],
+                   "gaps": ["Kafka"]},
+         "expected_failing_check": "gap_is_real",
+         "note": "claims no resume evidence for Kafka, but resume-skills covers it"},
+        {"id": "adv-05-orphan-requirement", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": [p for p in honest_points if p["requirement"] != "AWS"],
+                   "gaps": []},
+         "expected_failing_check": "no_orphan_requirements",
+         "note": "AWS silently dropped: neither a point nor a gap"},
+    ]
+
+
+def run_checker_eval(cases: list[dict] | None = None) -> dict:
+    """Iteration 2026-11-16 eval: the independent checker, three ways.
+
+    A. Baseline: the honest cascade pipeline on the 5 labelled cases —
+       the checker should find nothing wrong (0 repairs). A checker
+       that flags honest drafts is noise, not safety.
+    B. Adversarial: the 5 hand-built bad drafts — the checker must
+       catch the exact failing check in each, and one repair + re-check
+       must clear it. Detection and repair are measured separately:
+       catching a bug you cannot fix still ends at a human.
+    C. Full checked pipeline on the 5 cases — checker_passed rate,
+       repairs used, steps (must stay <= 8), and total cost.
+    """
+    from .checker import (MAX_STEPS_CHECKED, check_and_repair,
+                          check_materials, repair_materials)
+    from .materials import (generate_materials_cascade, load_resume_chunks)
+
+    cases = cases if cases is not None else load_material_cases()
+    chunks = load_resume_chunks()
+
+    baseline_rows, baseline_pass = [], 0
+    for case in cases:
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        draft = generate_materials_cascade(job, chunks=chunks)
+        report = check_materials(job, draft, chunks=chunks)
+        baseline_pass += int(report["passed"])
+        baseline_rows.append({"id": case["id"], "passed": report["passed"],
+                              "num_checks": report["num_checks"],
+                              "num_failed": report["num_failed"]})
+
+    adv_rows, detected, repaired = [], 0, 0
+    for adv in build_adversarial_drafts(chunks):
+        report = check_materials(adv["job"], adv["draft"], chunks=chunks)
+        caught = any(f["check"] == adv["expected_failing_check"]
+                     for f in report["failures"])
+        detected += int(caught)
+        fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
+                                 chunks=chunks)
+        recheck = check_materials(adv["job"], fixed["draft"], chunks=chunks)
+        repaired += int(recheck["passed"])
+        adv_rows.append({"id": adv["id"],
+                         "expected_failing_check": adv["expected_failing_check"],
+                         "caught": caught,
+                         "failures": [f["check"] for f in report["failures"]],
+                         "repairs": [r["fix"] for r in fixed["repairs"]],
+                         "recheck_passed": recheck["passed"]})
+
+    checked_rows, checked_pass, repairs_used, steps_max, cost = [], 0, 0, 0, 0.0
+    for case in cases:
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        from .checker import generate_materials_checked
+        result = generate_materials_checked(job, chunks=chunks)
+        checked_pass += int(result["checker_passed"])
+        repairs_used += len(result["repairs"])
+        steps_max = max(steps_max, result["steps_used"])
+        cost += result["total_cost_usd"]
+        checked_rows.append({"id": case["id"],
+                             "checker_passed": result["checker_passed"],
+                             "repairs": len(result["repairs"]),
+                             "steps_used": result["steps_used"],
+                             "cost_usd": result["total_cost_usd"]})
+    return {
+        "baseline": {"cases": len(cases), "passed": baseline_pass,
+                     "rows": baseline_rows},
+        "adversarial": {"cases": len(adv_rows), "detected": detected,
+                        "repaired": repaired, "rows": adv_rows},
+        "checked_pipeline": {"cases": len(cases), "passed": checked_pass,
+                             "repairs_used": repairs_used,
+                             "max_steps_used": steps_max,
+                             "step_cap": MAX_STEPS_CHECKED,
+                             "total_cost_usd": round(cost, 6), "rows": checked_rows},
+    }
+
+
 def load_planner_cases(path: Path = DATA_DIR / "eval_planner.json") -> list[dict]:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -307,6 +450,19 @@ if __name__ == "__main__":
               f"missed={r['missed']} cost=${r['cost_usd']}")
     print(f"threshold sensitivity (recall): min=3 -> {c['threshold_sensitivity'][3]:.0%}, "
           f"min=4 -> {c['threshold_sensitivity'][4]:.0%}")
+
+    print("\n--- iteration 2026-11-16: checker eval (solver / checker split) ---")
+    k = run_checker_eval()
+    print(f"baseline (honest cascade drafts): {k['baseline']['passed']}/{k['baseline']['cases']} passed, "
+          f"repairs should be 0")
+    print(f"adversarial: detected {k['adversarial']['detected']}/{k['adversarial']['cases']}, "
+          f"repaired {k['adversarial']['repaired']}/{k['adversarial']['cases']}")
+    for r in k["adversarial"]["rows"]:
+        print(f"  {r['id']}: caught={r['caught']} ({r['failures']}) "
+              f"repairs={r['repairs']} recheck_passed={r['recheck_passed']}")
+    cp = k["checked_pipeline"]
+    print(f"checked pipeline: {cp['passed']}/{cp['cases']} passed, repairs_used={cp['repairs_used']}, "
+          f"max_steps={cp['max_steps_used']}/{cp['step_cap']}, cost=${cp['total_cost_usd']}")
 
     print("\n--- milestone 6: planner eval ---")
     p = run_planner_eval()
