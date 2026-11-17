@@ -41,6 +41,8 @@ def _mock_decide(user_text: str):
         return "fetch_jobs", {"source": "sample"}
     if "核对" in user_text or "检查" in user_text or "checker" in text or "审校" in user_text:
         return "draft_materials_checked", {"source": "eval"}
+    if "trace" in text or "追踪" in user_text or "治理" in user_text or "超预算" in user_text or "预算" in user_text:
+        return "draft_materials_traced", {"source": "eval"}
     if "级联" in user_text or "cascade" in text:
         return "draft_materials_cascade", {"source": "eval"}
     if "material" in text or "材料" in user_text or "申请要点" in user_text or "定制" in user_text:

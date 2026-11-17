@@ -315,6 +315,67 @@ def run_checker_eval(cases: list[dict] | None = None) -> dict:
     }
 
 
+def run_trace_eval(cases: list[dict] | None = None,
+                   max_cost_usd: float = 0.10) -> dict:
+    """Iteration 2026-11-17 eval: traces + cost-cap governance.
+
+    Two parts, both on the same 5 labelled materials cases:
+    A. Normal cap ($0.10, ~2x a healthy run): every traced run must
+       finish ok, ship its draft, and stay under the cap — the cap
+       must not trip on honest work, or it is noise, not safety.
+    B. Forced over-cap (cap $0.001 on eval-m01): the run MUST trip,
+       ship NO draft, and come back over_cap=True + needs_human=True,
+       with the trace naming the step that crossed the line.
+       A cap that never trips in a test is an untested promise.
+    Traces are written to a throwaway path (not data/traces.jsonl),
+    so the eval never pollutes the real audit trail.
+    """
+    import tempfile
+
+    from .tracing import (DEFAULT_MAX_RUN_COST_USD, run_traced_checked,
+                          trace_summary)
+
+    cases = cases if cases is not None else load_material_cases()
+    with tempfile.TemporaryDirectory() as tmp:
+        trace_path = Path(tmp) / "traces.jsonl"
+        rows, ok_runs, cost = [], 0, 0.0
+        for case in cases:
+            job = {k: v for k, v in case.items()
+                   if k not in ("expected_requirements", "expected_gaps", "note")}
+            out = run_traced_checked(job, max_cost_usd=max_cost_usd,
+                                     trace_path=trace_path)
+            ok_runs += int(not out["over_cap"] and out["draft"] is not None)
+            cost += out["trace"]["total_cost_usd"]
+            rows.append({"id": case["id"],
+                         "status": out["trace"]["status"],
+                         "steps": out["trace"]["num_steps"],
+                         "cost_usd": out["trace"]["total_cost_usd"],
+                         "over_alert": out["trace"]["over_alert"],
+                         "draft_shipped": out["draft"] is not None})
+        forced_job = {k: v for k, v in cases[0].items()
+                      if k not in ("expected_requirements", "expected_gaps", "note")}
+        forced = run_traced_checked(forced_job, max_cost_usd=0.001,
+                                    trace_path=trace_path)
+        summary = trace_summary(path=trace_path)
+    return {
+        "cases": len(cases),
+        "max_cost_usd": max_cost_usd,
+        "normal_cap": {"ok_runs": ok_runs, "total_cost_usd": round(cost, 6),
+                       "rows": rows},
+        "forced_over_cap": {
+            "case_id": cases[0]["id"],
+            "cap_usd": 0.001,
+            "over_cap": forced["over_cap"],
+            "needs_human": forced["needs_human"],
+            "draft_shipped": forced["draft"] is not None,
+            "steps_recorded": forced["trace"]["num_steps"],
+            "cost_at_trip_usd": forced["trace"]["total_cost_usd"],
+            "error": forced["error"],
+        },
+        "trace_summary": summary,
+    }
+
+
 def load_planner_cases(path: Path = DATA_DIR / "eval_planner.json") -> list[dict]:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -463,6 +524,24 @@ if __name__ == "__main__":
     cp = k["checked_pipeline"]
     print(f"checked pipeline: {cp['passed']}/{cp['cases']} passed, repairs_used={cp['repairs_used']}, "
           f"max_steps={cp['max_steps_used']}/{cp['step_cap']}, cost=${cp['total_cost_usd']}")
+
+    print("\n--- iteration 2026-11-17: trace + cost-cap eval ---")
+    tr = run_trace_eval()
+    print(f"trace eval (cap ${tr['max_cost_usd']}): "
+          f"{tr['normal_cap']['ok_runs']}/{tr['cases']} runs ok, "
+          f"total cost ${tr['normal_cap']['total_cost_usd']}")
+    for r in tr["normal_cap"]["rows"]:
+        print(f"  {r['id']}: {r['status']} steps={r['steps']} "
+              f"cost=${r['cost_usd']} over_alert={r['over_alert']} "
+              f"draft_shipped={r['draft_shipped']}")
+    f = tr["forced_over_cap"]
+    print(f"forced over-cap (cap ${f['cap_usd']}): over_cap={f['over_cap']} "
+          f"needs_human={f['needs_human']} draft_shipped={f['draft_shipped']} "
+          f"steps_recorded={f['steps_recorded']} cost_at_trip=${f['cost_at_trip_usd']}")
+    print(f"trace summary: {tr['trace_summary']['runs']} runs, "
+          f"total ${tr['trace_summary']['total_cost_usd']}, "
+          f"over_cap={tr['trace_summary']['over_cap_runs']}, "
+          f"most expensive={tr['trace_summary']['most_expensive']}")
 
     print("\n--- milestone 6: planner eval ---")
     p = run_planner_eval()

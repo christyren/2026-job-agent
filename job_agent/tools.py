@@ -209,6 +209,42 @@ def draft_materials_checked(source: str = "eval", case_id: str = "",
     raise ValueError(f"unknown source: {source} (use 'eval', or pass case_id)")
 
 
+def draft_materials_traced(source: str = "eval", case_id: str = "",
+                           min_requirements: int = 4,
+                           max_cost_usd: float = 0.10) -> dict:
+    """Iteration 2026-11-17 tool: traced materials + cost-cap governance.
+
+    source='eval' (no case_id) -> run the trace eval: 5 labelled cases
+    under the normal $0.10 cap (all must finish ok and ship a draft),
+    plus one forced over-cap run at $0.001 (must trip, ship nothing,
+    and flag needs_human), plus the rollup over saved traces.
+    source='summary' -> rollup over data/traces.jsonl: runs, total
+    cost, over-cap runs, most expensive run.
+    case_id='eval-m01' etc. -> generate one checked draft inside a
+    trace (trace_id + per-step tier/tokens/cost, saved to
+    data/traces.jsonl); if the run crosses max_cost_usd it stops and
+    returns no draft, flagged over_cap + needs_human.
+    Drafts only — never submits an application.
+    """
+    from .evaluate import load_material_cases, run_trace_eval
+    from .tracing import run_traced_checked, trace_summary
+
+    if source == "summary":
+        return {"source": "summary", **trace_summary()}
+    if case_id:
+        cases = {c["id"]: c for c in load_material_cases()}
+        if case_id not in cases:
+            raise ValueError(f"unknown case_id: {case_id} (have {sorted(cases)})")
+        case = cases[case_id]
+        job = {k: v for k, v in case.items()
+               if k not in ("expected_requirements", "expected_gaps", "note")}
+        return {"case_id": case_id,
+                **run_traced_checked(job, max_cost_usd=max_cost_usd)}
+    if source == "eval":
+        return {"source": "eval", **run_trace_eval(max_cost_usd=max_cost_usd)}
+    raise ValueError(f"unknown source: {source} (use 'eval', 'summary', or pass case_id)")
+
+
 def track_applications(action: str = "summary", app_id: str = "",
                          to: str = "", note: str = "") -> dict:
     """Milestone 5 tool: application tracking over the durable store.
@@ -298,6 +334,7 @@ TOOL_FUNCTIONS = {
     "score_jobs_batch": score_jobs_batch,
     "draft_materials_cascade": draft_materials_cascade,
     "draft_materials_checked": draft_materials_checked,
+    "draft_materials_traced": draft_materials_traced,
 }
 
 # Schemas in Anthropic Messages API format: name + description + input_schema (JSON Schema).
@@ -398,6 +435,19 @@ TOOL_SCHEMAS = [
                 "source": {"type": "string", "enum": ["eval"], "description": "Use 'eval' for the checker evaluation set"},
                 "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m01') to generate a single checked draft for"},
                 "min_requirements": {"type": "integer", "description": "Cascade escalation threshold: escalate while fewer than this many requirements are found (default 4)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "draft_materials_traced",
+        "description": "Draft tailored application points inside a run trace with a hard per-run cost cap (governance): each run gets a trace_id and a per-step log (step name, model tier, input/output tokens, cost, running total), saved append-only to data/traces.jsonl for later audit. With source='eval' and no case_id, runs the trace eval (5 labelled cases under the normal $0.10 cap plus one forced over-cap run at $0.001 that must stop, ship no draft, and flag needs_human). With source='summary', rolls up saved traces: runs, total cost, over-cap runs, most expensive run. With a case_id like 'eval-m01', generates one checked draft inside a trace; if the run crosses max_cost_usd it stops and returns no draft. Drafts only — never submits an application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["eval", "summary"], "description": "Use 'eval' for the trace + cost-cap evaluation, or 'summary' for the rollup over saved traces"},
+                "case_id": {"type": "string", "description": "Optional labelled case id (e.g. 'eval-m01') to generate a single traced draft for"},
+                "max_cost_usd": {"type": "number", "description": "Hard per-run cost ceiling in USD (default 0.10, about 2x a healthy checked run)"},
             },
             "required": [],
         },
