@@ -173,13 +173,17 @@ def run_materials_cascade_eval(cases: list[dict] | None = None,
 
 
 def build_adversarial_drafts(chunks=None) -> list[dict]:
-    """Iteration 2026-11-16: five hand-built BAD drafts, one per checker
-    rule, so the eval measures detection instead of assuming it.
+    """Iteration 2026-11-16: six hand-built BAD drafts.
 
-    All five start from the eval-m01 job (RoutingCloud: Java /
+    All six start from the eval-m01 job (RoutingCloud: Java /
     distributed systems / Kafka / REST API / AWS) and real resume
     chunks — each draft breaks exactly one rule, so a checker that
-    passes it is provably blind to that failure mode.
+    passes it is provably blind to that failure mode. adv-06 (added
+    2026-11-18) is a sharper second case for
+    evidence_supports_requirement: same rule as adv-03, but the wrong
+    chunk is the education block — a chunk about degrees, not
+    engineering at all — and the quote is verbatim, so the verbatim
+    check must pass while the supports check must fail.
     """
     from .materials import load_resume_chunks
 
@@ -191,6 +195,7 @@ def build_adversarial_drafts(chunks=None) -> list[dict]:
     skills = by_id["resume-skills"]
     tesla = by_id["tesla-fullstack"]
     spark_chunk = by_id["microsoft-data-ai"]
+    education = by_id["education"]
 
     def point(req, chunk, quote=None):
         return {"requirement": req, "evidence_chunk_id": chunk.id,
@@ -236,6 +241,16 @@ def build_adversarial_drafts(chunks=None) -> list[dict]:
                    "gaps": []},
          "expected_failing_check": "no_orphan_requirements",
          "note": "AWS silently dropped: neither a point nor a gap"},
+        {"id": "adv-06-wrong-chunk-education", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": [point("Java", education)] + honest_points[1:],
+                   "gaps": []},
+         "expected_failing_check": "evidence_supports_requirement",
+         "note": "Java IS in the JD and the quote IS verbatim from the "
+                 "education chunk — but that chunk is about degrees "
+                 "(statistics / WashU / BFSU) and says nothing about "
+                 "Java; adv-03's sharper cousin: the wrong chunk is "
+                 "not even engineering"},
     ]
 
 
@@ -245,7 +260,7 @@ def run_checker_eval(cases: list[dict] | None = None) -> dict:
     A. Baseline: the honest cascade pipeline on the 5 labelled cases —
        the checker should find nothing wrong (0 repairs). A checker
        that flags honest drafts is noise, not safety.
-    B. Adversarial: the 5 hand-built bad drafts — the checker must
+    B. Adversarial: the 6 hand-built bad drafts — the checker must
        catch the exact failing check in each, and one repair + re-check
        must clear it. Detection and repair are measured separately:
        catching a bug you cannot fix still ends at a human.

@@ -2,7 +2,7 @@
 
 The checker is tested the way a verifier should be tested: not by
 showing it honest drafts (those must pass silently), but by feeding it
-five bad drafts that each break exactly one rule and demanding it
+six bad drafts that each break exactly one rule and demanding it
 catch the right one — and then proving one repair + one re-check
 clears each of them.
 """
@@ -43,6 +43,33 @@ class TestCheckerRules(unittest.TestCase):
         self.assertFalse(report["passed"])
         self.assertIn("evidence_supports_requirement",
                       [f["check"] for f in report["failures"]])
+
+    def test_wrong_chunk_education_caught(self):
+        # 2026-11-18 (adv-06): the Java point cites the education chunk
+        # with a VERBATIM quote, so evidence_verbatim must pass — but
+        # the chunk is about degrees, not Java, so the supports check
+        # must fail, and it must be the ONLY failure.
+        report, adv = self._report("adv-06-wrong-chunk-education")
+        self.assertFalse(report["passed"])
+        failing = [f["check"] for f in report["failures"]]
+        self.assertIn("evidence_supports_requirement", failing)
+        self.assertNotIn("evidence_verbatim", failing)
+        self.assertNotIn("requirement_in_jd", failing)
+        self.assertNotIn("no_orphan_requirements", failing)
+        self.assertEqual(len(report["failures"]), 1)
+
+    def test_wrong_chunk_education_repairs_to_skills_chunk(self):
+        # The repair must re-cite the Java point from resume-skills,
+        # not just drop it.
+        adv = self.adversarials["adv-06-wrong-chunk-education"]
+        report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
+        fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
+                                 chunks=self.chunks)
+        java = [p for p in fixed["draft"]["points"]
+                if p["requirement"] == "Java"]
+        self.assertEqual(len(java), 1)
+        self.assertEqual(java[0]["evidence_chunk_id"], "resume-skills")
+        self.assertEqual(len(fixed["draft"]["points"]), 5)
 
     def test_fake_gap_caught(self):
         report, adv = self._report("adv-04-fake-gap")
@@ -161,8 +188,8 @@ class TestCheckerTool(unittest.TestCase):
     def test_tool_eval_runs(self):
         from job_agent.tools import draft_materials_checked
         report = draft_materials_checked(source="eval")
-        self.assertEqual(report["adversarial"]["detected"], 5)
-        self.assertEqual(report["adversarial"]["repaired"], 5)
+        self.assertEqual(report["adversarial"]["detected"], 6)
+        self.assertEqual(report["adversarial"]["repaired"], 6)
 
     def test_tool_single_case(self):
         from job_agent.tools import draft_materials_checked
