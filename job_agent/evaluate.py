@@ -173,9 +173,9 @@ def run_materials_cascade_eval(cases: list[dict] | None = None,
 
 
 def build_adversarial_drafts(chunks=None) -> list[dict]:
-    """Iteration 2026-11-16: six hand-built BAD drafts.
+    """Iteration 2026-11-16: seven hand-built BAD drafts.
 
-    All six start from the eval-m01 job (RoutingCloud: Java /
+    All seven start from the eval-m01 job (RoutingCloud: Java /
     distributed systems / Kafka / REST API / AWS) and real resume
     chunks — each draft breaks exactly one rule, so a checker that
     passes it is provably blind to that failure mode. adv-06 (added
@@ -183,7 +183,13 @@ def build_adversarial_drafts(chunks=None) -> list[dict]:
     evidence_supports_requirement: same rule as adv-03, but the wrong
     chunk is the education block — a chunk about degrees, not
     engineering at all — and the quote is verbatim, so the verbatim
-    check must pass while the supports check must fail.
+    check must pass while the supports check must fail. adv-07 (added
+    2026-11-19) is a second case for gap_is_real, the same rule as
+    adv-04 but with a different requirement: REST API is listed as a
+    gap even though resume-skills covers it — and retrieve() hits
+    resume-skills first, because it is the first chunk in the file
+    whose keywords contain "rest api", so the repair must make the
+    point from resume-skills.
     """
     from .materials import load_resume_chunks
 
@@ -251,6 +257,17 @@ def build_adversarial_drafts(chunks=None) -> list[dict]:
                  "(statistics / WashU / BFSU) and says nothing about "
                  "Java; adv-03's sharper cousin: the wrong chunk is "
                  "not even engineering"},
+        {"id": "adv-07-fake-gap-rest-api", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": [p for p in honest_points
+                              if p["requirement"] != "REST API"],
+                   "gaps": ["REST API"]},
+         "expected_failing_check": "gap_is_real",
+         "note": "claims no resume evidence for REST API, but "
+                 "resume-skills lists it ('REST APIs' in the skills "
+                 "block); adv-04's second case, same rule — a fake "
+                 "gap hides a point that should exist, and the "
+                 "repair must turn it into a point from resume-skills"},
     ]
 
 
@@ -260,7 +277,7 @@ def run_checker_eval(cases: list[dict] | None = None) -> dict:
     A. Baseline: the honest cascade pipeline on the 5 labelled cases —
        the checker should find nothing wrong (0 repairs). A checker
        that flags honest drafts is noise, not safety.
-    B. Adversarial: the 6 hand-built bad drafts — the checker must
+    B. Adversarial: the 7 hand-built bad drafts — the checker must
        catch the exact failing check in each, and one repair + re-check
        must clear it. Detection and repair are measured separately:
        catching a bug you cannot fix still ends at a human.

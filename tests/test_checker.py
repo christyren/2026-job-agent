@@ -2,7 +2,7 @@
 
 The checker is tested the way a verifier should be tested: not by
 showing it honest drafts (those must pass silently), but by feeding it
-six bad drafts that each break exactly one rule and demanding it
+seven bad drafts that each break exactly one rule and demanding it
 catch the right one — and then proving one repair + one re-check
 clears each of them.
 """
@@ -76,6 +76,19 @@ class TestCheckerRules(unittest.TestCase):
         self.assertFalse(report["passed"])
         self.assertIn("gap_is_real", [f["check"] for f in report["failures"]])
 
+    def test_fake_gap_rest_api_caught(self):
+        # 2026-11-19 (adv-07): "REST API" is listed as a gap even
+        # though resume-skills covers it. gap_is_real must be the
+        # ONLY failure — the other four points are honest, and REST
+        # API is accounted for (as a gap), so no_orphan must pass.
+        report, adv = self._report("adv-07-fake-gap-rest-api")
+        self.assertFalse(report["passed"])
+        failing = [f["check"] for f in report["failures"]]
+        self.assertIn("gap_is_real", failing)
+        self.assertNotIn("no_orphan_requirements", failing)
+        self.assertNotIn("evidence_supports_requirement", failing)
+        self.assertEqual(len(report["failures"]), 1)
+
     def test_orphan_requirement_caught(self):
         report, adv = self._report("adv-05-orphan-requirement")
         self.assertFalse(report["passed"])
@@ -130,6 +143,24 @@ class TestRepair(unittest.TestCase):
                                  chunks=self.chunks)
         self.assertNotIn("Kafka", fixed["draft"]["gaps"])
         self.assertIn("Kafka", [p["requirement"] for p in fixed["draft"]["points"]])
+
+    def test_repair_turns_fake_gap_rest_api_into_point(self):
+        # 2026-11-19 (adv-07): the repair must turn the fake "REST
+        # API" gap into a point cited from resume-skills — retrieve()
+        # hits resume-skills first, because it is the first chunk
+        # whose keywords contain "rest api" — and the draft must be
+        # whole again: 5 points, no gaps left.
+        adv = self.adversarials["adv-07-fake-gap-rest-api"]
+        report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
+        fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
+                                 chunks=self.chunks)
+        self.assertNotIn("REST API", fixed["draft"]["gaps"])
+        rest = [p for p in fixed["draft"]["points"]
+                if p["requirement"] == "REST API"]
+        self.assertEqual(len(rest), 1)
+        self.assertEqual(rest[0]["evidence_chunk_id"], "resume-skills")
+        self.assertEqual(len(fixed["draft"]["points"]), 5)
+        self.assertEqual(fixed["draft"]["gaps"], [])
 
     def test_repair_adds_orphan_as_point(self):
         adv = self.adversarials["adv-05-orphan-requirement"]
@@ -188,8 +219,8 @@ class TestCheckerTool(unittest.TestCase):
     def test_tool_eval_runs(self):
         from job_agent.tools import draft_materials_checked
         report = draft_materials_checked(source="eval")
-        self.assertEqual(report["adversarial"]["detected"], 6)
-        self.assertEqual(report["adversarial"]["repaired"], 6)
+        self.assertEqual(report["adversarial"]["detected"], 7)
+        self.assertEqual(report["adversarial"]["repaired"], 7)
 
     def test_tool_single_case(self):
         from job_agent.tools import draft_materials_checked
