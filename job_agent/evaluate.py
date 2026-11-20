@@ -173,9 +173,9 @@ def run_materials_cascade_eval(cases: list[dict] | None = None,
 
 
 def build_adversarial_drafts(chunks=None) -> list[dict]:
-    """Iteration 2026-11-16: seven hand-built BAD drafts.
+    """Iteration 2026-11-16: eight hand-built BAD drafts.
 
-    All seven start from the eval-m01 job (RoutingCloud: Java /
+    All eight start from the eval-m01 job (RoutingCloud: Java /
     distributed systems / Kafka / REST API / AWS) and real resume
     chunks — each draft breaks exactly one rule, so a checker that
     passes it is provably blind to that failure mode. adv-06 (added
@@ -189,7 +189,13 @@ def build_adversarial_drafts(chunks=None) -> list[dict]:
     gap even though resume-skills covers it — and retrieve() hits
     resume-skills first, because it is the first chunk in the file
     whose keywords contain "rest api", so the repair must make the
-    point from resume-skills.
+    point from resume-skills. adv-08 (added 2026-11-20) is the first
+    state-conflict case, the fourth failure mode in the 2026-11-18
+    adversarial-testing article: REST API is BOTH a point (honest,
+    from resume-skills) and a gap, so the draft disagrees with
+    itself. Only gap_is_real may fail — and the old repair would have
+    appended a second REST API point, leaving a duplicate; the fix is
+    to drop the gap and add nothing.
     """
     from .materials import load_resume_chunks
 
@@ -268,6 +274,17 @@ def build_adversarial_drafts(chunks=None) -> list[dict]:
                  "block); adv-04's second case, same rule — a fake "
                  "gap hides a point that should exist, and the "
                  "repair must turn it into a point from resume-skills"},
+        {"id": "adv-08-state-conflict-point-and-gap", "job": job,
+         "draft": {"job_company": "RoutingCloud",
+                   "points": list(honest_points),
+                   "gaps": ["REST API"]},
+         "expected_failing_check": "gap_is_real",
+         "note": "REST API is BOTH an honest point (resume-skills) "
+                 "and a gap: the draft claims to have it and to lack "
+                 "it at the same time. Repair must drop the gap only — "
+                 "appending a second REST API point would leave a "
+                 "duplicate, and a repair that changes the draft when "
+                 "run twice is not idempotent"},
     ]
 
 
@@ -277,7 +294,7 @@ def run_checker_eval(cases: list[dict] | None = None) -> dict:
     A. Baseline: the honest cascade pipeline on the 5 labelled cases —
        the checker should find nothing wrong (0 repairs). A checker
        that flags honest drafts is noise, not safety.
-    B. Adversarial: the 7 hand-built bad drafts — the checker must
+    B. Adversarial: the 8 hand-built bad drafts — the checker must
        catch the exact failing check in each, and one repair + re-check
        must clear it. Detection and repair are measured separately:
        catching a bug you cannot fix still ends at a human.

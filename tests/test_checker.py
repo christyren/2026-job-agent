@@ -2,13 +2,13 @@
 
 The checker is tested the way a verifier should be tested: not by
 showing it honest drafts (those must pass silently), but by feeding it
-seven bad drafts that each break exactly one rule and demanding it
+eight bad drafts that each break exactly one rule and demanding it
 catch the right one — and then proving one repair + one re-check
 clears each of them.
 """
 import unittest
 
-from job_agent.checker import (MAX_REPAIRS, MAX_STEPS_CHECKED,
+from job_agent.checker import (MAX_REPAIRS, MAX_STEPS_CHECKED, _minimal_quote,
                                check_and_repair, check_materials,
                                generate_materials_checked, repair_materials)
 from job_agent.evaluate import (build_adversarial_drafts, load_material_cases,
@@ -89,6 +89,19 @@ class TestCheckerRules(unittest.TestCase):
         self.assertNotIn("evidence_supports_requirement", failing)
         self.assertEqual(len(report["failures"]), 1)
 
+    def test_state_conflict_point_and_gap_caught(self):
+        # 2026-11-20 (adv-08): "REST API" is BOTH an honest point and
+        # a gap — the draft disagrees with itself. gap_is_real must be
+        # the ONLY failure: the point is honest (supports + verbatim
+        # pass), and REST API is accounted for, so no_orphan passes.
+        report, adv = self._report("adv-08-state-conflict-point-and-gap")
+        self.assertFalse(report["passed"])
+        failing = [f["check"] for f in report["failures"]]
+        self.assertIn("gap_is_real", failing)
+        self.assertNotIn("no_orphan_requirements", failing)
+        self.assertNotIn("evidence_supports_requirement", failing)
+        self.assertEqual(len(report["failures"]), 1)
+
     def test_orphan_requirement_caught(self):
         report, adv = self._report("adv-05-orphan-requirement")
         self.assertFalse(report["passed"])
@@ -162,6 +175,57 @@ class TestRepair(unittest.TestCase):
         self.assertEqual(len(fixed["draft"]["points"]), 5)
         self.assertEqual(fixed["draft"]["gaps"], [])
 
+    def test_repair_conflict_drops_gap_without_duplicating_point(self):
+        # 2026-11-20 (adv-08): the draft already HAS a REST API point,
+        # so the repair must only drop the fake gap — the old code
+        # appended a second REST API point and left a duplicate.
+        adv = self.adversarials["adv-08-state-conflict-point-and-gap"]
+        report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
+        fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
+                                 chunks=self.chunks)
+        self.assertEqual(fixed["draft"]["gaps"], [])
+        rest = [p for p in fixed["draft"]["points"]
+                if p["requirement"] == "REST API"]
+        self.assertEqual(len(rest), 1)
+        self.assertEqual(len(fixed["draft"]["points"]), 5)
+        # The surviving REST API point is the original honest one —
+        # the repair only dropped the gap, it did not re-create the
+        # point, so its quote is untouched (still the full chunk text).
+
+    def test_repaired_fake_gap_point_uses_minimal_quote(self):
+        # 2026-11-20: adv-07's repair DOES create the REST API point,
+        # so it goes through _point_for — its quote must be only the
+        # sentence that names REST APIs, still a verbatim substring of
+        # resume-skills, but shorter than the whole block.
+        adv = self.adversarials["adv-07-fake-gap-rest-api"]
+        report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
+        fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
+                                 chunks=self.chunks)
+        skills = next(c for c in self.chunks if c.id == "resume-skills")
+        rest = [p for p in fixed["draft"]["points"]
+                if p["requirement"] == "REST API"]
+        self.assertEqual(len(rest), 1)
+        quote = rest[0]["evidence_quote"]
+        self.assertIn("REST APIs", quote)
+        self.assertIn(quote, skills.text)
+        self.assertLess(len(quote), len(skills.text))
+
+    def test_repair_is_idempotent(self):
+        # 2026-11-20: run the repair on adv-08, re-check (clean), then
+        # repair the repaired draft again — the second run must change
+        # nothing. A repair that is not idempotent doubles its side
+        # effect on every retry, exactly like a payment charged twice.
+        adv = self.adversarials["adv-08-state-conflict-point-and-gap"]
+        report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
+        fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
+                                 chunks=self.chunks)
+        recheck = check_materials(adv["job"], fixed["draft"], chunks=self.chunks)
+        self.assertTrue(recheck["passed"])
+        again = repair_materials(adv["job"], fixed["draft"], recheck["failures"],
+                                 chunks=self.chunks)
+        self.assertEqual(again["draft"], fixed["draft"])
+        self.assertEqual(again["repairs"], [])
+
     def test_repair_adds_orphan_as_point(self):
         adv = self.adversarials["adv-05-orphan-requirement"]
         report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
@@ -177,6 +241,33 @@ class TestRepair(unittest.TestCase):
         self.assertFalse(result["checker_passed"])
         self.assertTrue(result["needs_human"])
         self.assertEqual(result["repairs"], [])
+
+
+class TestMinimalQuote(unittest.TestCase):
+    def setUp(self):
+        self.chunks = load_resume_chunks()
+        self.skills = next(c for c in self.chunks if c.id == "resume-skills")
+
+    def test_minimal_quote_is_the_sentence_that_names_it(self):
+        # 2026-11-20: the REST API evidence is one sentence of the
+        # four-sentence skills block — quote that sentence only.
+        quote = _minimal_quote(self.skills, "REST API")
+        self.assertEqual(
+            quote, "Backend and cloud: distributed systems, REST APIs, "
+                   "microservices, Spring Boot, ASP.NET Core, AWS, Azure.")
+        self.assertIn(quote, self.skills.text)
+
+    def test_minimal_quote_finds_first_sentence_for_java(self):
+        quote = _minimal_quote(self.skills, "Java")
+        self.assertEqual(
+            quote, "Programming: Java, C#, Python, JavaScript, TypeScript.")
+        self.assertIn(quote, self.skills.text)
+
+    def test_minimal_quote_falls_back_to_full_chunk(self):
+        # No sentence in the skills block mentions GraphQL: fall back
+        # to the whole chunk instead of quoting nothing.
+        self.assertEqual(_minimal_quote(self.skills, "GraphQL"),
+                         self.skills.text)
 
 
 class TestCheckedPipeline(unittest.TestCase):
@@ -219,8 +310,8 @@ class TestCheckerTool(unittest.TestCase):
     def test_tool_eval_runs(self):
         from job_agent.tools import draft_materials_checked
         report = draft_materials_checked(source="eval")
-        self.assertEqual(report["adversarial"]["detected"], 7)
-        self.assertEqual(report["adversarial"]["repaired"], 7)
+        self.assertEqual(report["adversarial"]["detected"], 8)
+        self.assertEqual(report["adversarial"]["repaired"], 8)
 
     def test_tool_single_case(self):
         from job_agent.tools import draft_materials_checked

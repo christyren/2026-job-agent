@@ -45,7 +45,7 @@ Checker 从 JD 原文（strong 档重抽）与简历块（重新检索）独立�
 
 1. **基线**：诚实的级联草稿过 checker——应该全过、0 次修复。
    一个对诚实草稿乱报警的 checker 是噪音，不是安全。
-2. **对抗**：7 份手工造的坏草稿，每份只违反一条规则——
+2. **对抗**：8 份手工造的坏草稿，每份只违反一条规则——
    检测率（抓没抓到）与修复率（修一次 + 复验能不能过）分开量：
    抓到修不好，终点还是人。其中 adv-06（2026-11-18 新增）是 adv-03
    的加强版：Java 要点引 education 块、引文逐字正确，所以 verbatim
@@ -53,6 +53,9 @@ Checker 从 JD 原文（strong 档重抽）与简历块（重新检索）独立�
    adv-07（2026-11-19 新增）是 adv-04 的第二例：把"REST API"写进
    gaps 当假缺口——简历 resume-skills 块明明写着，修复后它必须变回
    要点（从 resume-skills 块取证），而不是留在 gaps。
+   adv-08（2026-11-20 新增）是第一例**状态冲突**：REST API 同时是
+   要点和缺口——草稿自己跟自己打架。只允许 gap_is_real 报警，
+   修复必须只删缺口、不许再补一个要点，否则要点就重复了。
 3. **全流水线**：5 案跑 `generate_materials_checked`——
    checker_passed 率、用了几次修复、步数（≤8）、总成本。
 
@@ -64,6 +67,19 @@ python3 main.py "帮我核对申请材料"          # 走 agent loop 调 draft_m
 python3 -c "from job_agent.tools import draft_materials_checked; print(draft_materials_checked(case_id='eval-m01'))"
 python3 -m unittest discover -s tests -v
 ```
+
+## 最小证据引文 + 修复幂等（2026-11-20 迭代 14）
+
+- **最小引文**：修复新生成的要点，引文只贴提到该要求的那一句
+  （`_minimal_quote`），而不是整块原文。逐字规则照样过——那一句
+  仍是原文的子串；supports 规则根本不读引文（它查块的 keywords），
+  所以引文变短既不会让它更容易过、也不会更难过——只影响人读到
+  的证据清不清晰。找不到单句时回退到整块原文。
+- **修复幂等**：修两次 = 修一次。adv-08 抓到的就是旧修复的非幂等
+  bug：要点已存在时又补一个要点，草稿里出现重复。修复前先查
+  "这条要求是不是已经有要点了"，有就只删缺口、什么都不补。
+  和支付接口的 Idempotency-Key 是同一条道理：重试不可避免，
+  重复的副作用必须无害。
 
 ## 下一步预告
 

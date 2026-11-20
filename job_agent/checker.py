@@ -67,6 +67,7 @@ the human.
 from __future__ import annotations
 
 import json
+import re
 
 from .materials import (MAX_STEPS_PER_TASK, RunBudget, extract_requirements,
                         generate_materials_cascade, load_resume_chunks,
@@ -152,6 +153,34 @@ def check_materials(job: dict, draft: dict,
             "num_checks": len(checks), "num_failed": len(failures)}
 
 
+def _minimal_quote(chunk, requirement: str) -> str:
+    """Quote only the sentence that mentions the requirement.
+
+    Iteration 2026-11-20: a repair that quotes the whole chunk is
+    correct but noisy — a 200-word experience block pasted into a
+    one-line point buries the evidence the recruiter is meant to see.
+    The sentence that actually names the requirement is still a
+    verbatim substring of the chunk, so evidence_verbatim still
+    passes. And evidence_supports_requirement never reads the quote
+    at all — it checks the cited chunk's keywords (ResumeChunk.covers)
+    — so trimming the quote cannot make that rule easier or harder;
+    it only changes what the human reader sees. Falls back to the
+    full chunk text when no single sentence mentions the requirement.
+    """
+    req = requirement.lower()
+    sentences = re.split(r"(?<=[.!?])\s+", chunk.text.strip())
+    for sent in sentences:
+        if req in sent.lower():
+            return sent
+    # The requirement's wording may differ from the chunk's wording:
+    # try any keyword that covers the requirement.
+    for sent in sentences:
+        if any(k.lower() in sent.lower() for k in chunk.keywords
+               if req in k.lower()):
+            return sent
+    return chunk.text
+
+
 def repair_materials(job: dict, draft: dict, failures: list[dict],
                      chunks: list | None = None) -> dict:
     """Fix a draft from the checker's failure list, one failure at a time.
@@ -171,9 +200,10 @@ def repair_materials(job: dict, draft: dict, failures: list[dict],
         chunk = retrieve(req, chunks)
         if chunk is None:
             return None
+        quote = _minimal_quote(chunk, req)
         return {"requirement": req, "evidence_chunk_id": chunk.id,
-                "evidence_quote": chunk.text,
-                "point": f"For {req}: {chunk.text}"}
+                "evidence_quote": quote,
+                "point": f"For {req}: {quote}"}
 
     for f in failures:
         check, item = f["check"], f["item"]
@@ -193,11 +223,23 @@ def repair_materials(job: dict, draft: dict, failures: list[dict],
                                 "fix": "no covering chunk, moved to gaps"})
         elif check == "gap_is_real":
             gaps = [g for g in gaps if g != item]
-            fixed = _point_for(item)
-            if fixed is not None:
-                points.append(fixed)
+            if any(p.get("requirement") == item for p in points):
+                # State conflict (adv-08): the draft already has a
+                # point for this requirement AND lists it as a gap —
+                # it disagrees with itself. Dropping the gap is the
+                # whole fix. Appending a second point here would leave
+                # a duplicate, and a repair that is not idempotent
+                # (run it twice, get two points) is a bug, not a fix:
+                # at-least-once delivery plus idempotent processing is
+                # the only honest contract, for repairs as for payments.
                 repairs.append({"failure": check, "item": item,
-                                "fix": f"fake gap, made point from {fixed['evidence_chunk_id']}"})
+                                "fix": "fake gap, point already exists — dropped gap only"})
+            else:
+                fixed = _point_for(item)
+                if fixed is not None:
+                    points.append(fixed)
+                    repairs.append({"failure": check, "item": item,
+                                    "fix": f"fake gap, made point from {fixed['evidence_chunk_id']}"})
         elif check == "no_orphan_requirements":
             fixed = _point_for(item)
             if fixed is not None:
