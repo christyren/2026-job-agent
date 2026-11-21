@@ -81,6 +81,16 @@ python3 -m unittest discover -s tests -v
   和支付接口的 Idempotency-Key 是同一条道理：重试不可避免，
   重复的副作用必须无害。
 
+**2026-11-21 迭代 15：生成器也用最小引文**——`_minimal_quote` 从
+`checker.py` 搬到 `materials.py`（生成器也要用，反向 import 会循环），
+生成器和修复器从此共用同一个函数、产出的要点一模一样（测试：
+同一条 Kafka 要点，生成版 = 修复版）。实测：材料 eval 三档 recall
+不变（70%/85%/100%）、grounded 100%、没有规则变红；每条合格要点
+成本强档 $0.003027 → $0.00096（约 −68%），级联总成本 $0.050841 →
+$0.015705。诚实注脚：离线账把引文同时算进生成步的输入和输出，
+所以降幅被放大了；真接 API 时省的主要是输出 token，方向对、
+数字别照搬。
+
 ## 下一步预告
 
 - 真接一次 Batch API（Anthropic Message Batches，需 API key），

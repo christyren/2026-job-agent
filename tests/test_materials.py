@@ -6,10 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from job_agent.checker import check_materials, repair_materials
 from job_agent.evaluate import load_material_cases, run_materials_eval
 from job_agent.materials import (
     MODEL_TIERS,
     RunBudget,
+    _minimal_quote,
     extract_requirements,
     generate_materials,
     load_resume_chunks,
@@ -82,6 +84,53 @@ class TestGenerationAndGrounding(unittest.TestCase):
         draft = generate_materials(GAP_JOB, chunks=CHUNKS)
         self.assertEqual(draft["points"], [])
         self.assertEqual(sorted(draft["gaps"]), ["Go", "GraphQL", "Kubernetes"])
+
+
+class TestMinimalQuotesInGeneration(unittest.TestCase):
+    """Iteration 2026-11-21: the generator quotes minimally too.
+
+    Before this iteration the generator pasted the whole ~345-char
+    skills chunk into every point while the repair path (since 11/20)
+    quoted one sentence — two paths, two shapes for the same point.
+    """
+
+    def test_generated_points_quote_one_sentence_not_the_whole_chunk(self):
+        draft = generate_materials(SYNONYM_JOB, chunks=CHUNKS, extract_tier="strong")
+        by_id = {c.id: c for c in CHUNKS}
+        self.assertTrue(draft["points"])
+        for p in draft["points"]:
+            chunk = by_id[p["evidence_chunk_id"]]
+            # Still verbatim (grounding veto must pass) but trimmed:
+            # the quote is a proper substring, not the whole chunk.
+            self.assertIn(p["evidence_quote"], chunk.text)
+            self.assertLess(len(p["evidence_quote"]), len(chunk.text))
+        kafka = next(p for p in draft["points"] if p["requirement"] == "Kafka")
+        self.assertIn("Kafka", kafka["evidence_quote"])
+
+    def test_generated_and_repaired_points_use_the_same_quote(self):
+        # The point of sharing _minimal_quote: a point built by
+        # generation and the same point rebuilt by repair must be
+        # identical — otherwise the checker would keep "fixing" a
+        # draft the generator just produced.
+        draft = generate_materials(SYNONYM_JOB, chunks=CHUNKS, extract_tier="strong")
+        generated_kafka = next(p for p in draft["points"]
+                               if p["requirement"] == "Kafka")
+        broken = {"job_company": draft["job_company"],
+                  "points": [p for p in draft["points"]
+                             if p["requirement"] != "Kafka"],
+                  "gaps": draft["gaps"] + ["Kafka"]}  # fake gap: resume has Kafka
+        report = check_materials(SYNONYM_JOB, broken, chunks=CHUNKS)
+        self.assertIn("gap_is_real", [f["check"] for f in report["failures"]])
+        repaired = repair_materials(SYNONYM_JOB, broken, report["failures"],
+                                    chunks=CHUNKS)["draft"]
+        repaired_kafka = next(p for p in repaired["points"]
+                              if p["requirement"] == "Kafka")
+        self.assertEqual(repaired_kafka, generated_kafka)
+
+    def test_minimal_quote_falls_back_to_full_chunk(self):
+        skills = next(c for c in CHUNKS if c.id == "resume-skills")
+        # No sentence in the skills chunk mentions GraphQL at all.
+        self.assertEqual(_minimal_quote(skills, "GraphQL"), skills.text)
 
 
 class TestRoutingAndBudget(unittest.TestCase):

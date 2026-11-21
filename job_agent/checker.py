@@ -67,11 +67,10 @@ the human.
 from __future__ import annotations
 
 import json
-import re
 
-from .materials import (MAX_STEPS_PER_TASK, RunBudget, extract_requirements,
-                        generate_materials_cascade, load_resume_chunks,
-                        retrieve, verify_grounding)
+from .materials import (MAX_STEPS_PER_TASK, RunBudget, _minimal_quote,
+                        extract_requirements, generate_materials_cascade,
+                        load_resume_chunks, retrieve, verify_grounding)
 
 # Checked pipeline step cap: plain pipeline worst case is 5 steps
 # (3 cascade extracts + generate + verify); the checker adds a check
@@ -151,34 +150,6 @@ def check_materials(job: dict, draft: dict,
 
     return {"passed": not failures, "checks": checks, "failures": failures,
             "num_checks": len(checks), "num_failed": len(failures)}
-
-
-def _minimal_quote(chunk, requirement: str) -> str:
-    """Quote only the sentence that mentions the requirement.
-
-    Iteration 2026-11-20: a repair that quotes the whole chunk is
-    correct but noisy — a 200-word experience block pasted into a
-    one-line point buries the evidence the recruiter is meant to see.
-    The sentence that actually names the requirement is still a
-    verbatim substring of the chunk, so evidence_verbatim still
-    passes. And evidence_supports_requirement never reads the quote
-    at all — it checks the cited chunk's keywords (ResumeChunk.covers)
-    — so trimming the quote cannot make that rule easier or harder;
-    it only changes what the human reader sees. Falls back to the
-    full chunk text when no single sentence mentions the requirement.
-    """
-    req = requirement.lower()
-    sentences = re.split(r"(?<=[.!?])\s+", chunk.text.strip())
-    for sent in sentences:
-        if req in sent.lower():
-            return sent
-    # The requirement's wording may differ from the chunk's wording:
-    # try any keyword that covers the requirement.
-    for sent in sentences:
-        if any(k.lower() in sent.lower() for k in chunk.keywords
-               if req in k.lower()):
-            return sent
-    return chunk.text
 
 
 def repair_materials(job: dict, draft: dict, failures: list[dict],

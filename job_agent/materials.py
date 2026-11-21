@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -265,6 +266,39 @@ def validate_materials(raw: dict) -> dict:
     return raw
 
 
+def _minimal_quote(chunk: ResumeChunk, requirement: str) -> str:
+    """Quote only the sentence that mentions the requirement.
+
+    Iteration 2026-11-21: the generator used to paste the whole chunk
+    (up to ~385 chars) into every point; the repair path has quoted
+    minimally since 2026-11-20, and the two paths disagreed about what
+    a point looks like. Now the generator uses the same function, so
+    a point built by generation and a point built by repair are
+    indistinguishable. The sentence that names the requirement is
+    still a verbatim substring of the chunk, so evidence_verbatim
+    still passes; evidence_supports_requirement never reads the quote
+    (it checks the chunk's keywords), so trimming it cannot make that
+    rule easier or harder — it only changes what the human reader
+    sees, and shrinks the token log, so cost per grounded point drops.
+    Falls back to the full chunk text when no single sentence mentions
+    the requirement. Lives here (not in checker.py) because the
+    generator needs it too and checker.py already imports from here —
+    the other direction would be a circular import.
+    """
+    req = requirement.lower()
+    sentences = re.split(r"(?<=[.!?])\s+", chunk.text.strip())
+    for sent in sentences:
+        if req in sent.lower():
+            return sent
+    # The requirement's wording may differ from the chunk's wording:
+    # try any keyword that covers the requirement.
+    for sent in sentences:
+        if any(k.lower() in sent.lower() for k in chunk.keywords
+               if req in k.lower()):
+            return sent
+    return chunk.text
+
+
 def _finish_materials(job: dict, chunks: list[ResumeChunk],
                       requirements: list[str], budget: RunBudget,
                       extract_tier: str, cascade: dict | None = None) -> dict:
@@ -280,11 +314,12 @@ def _finish_materials(job: dict, chunks: list[ResumeChunk],
         if chunk is None:
             gaps.append(req)  # no evidence in resume -> say so, never invent
         else:
+            quote = _minimal_quote(chunk, req)
             points.append({
                 "requirement": req,
                 "evidence_chunk_id": chunk.id,
-                "evidence_quote": chunk.text,
-                "point": f"For {req}: {chunk.text}",
+                "evidence_quote": quote,
+                "point": f"For {req}: {quote}",
             })
     budget.step("retrieve_and_generate", TASK_ROUTING["generate_points"],
                 " ".join(p["evidence_quote"] for p in points) or "(no chunks)",
