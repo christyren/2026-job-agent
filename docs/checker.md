@@ -91,6 +91,24 @@ $0.015705。诚实注脚：离线账把引文同时算进生成步的输入和�
 所以降幅被放大了；真接 API 时省的主要是输出 token，方向对、
 数字别照搬。
 
+**2026-11-22 迭代 16：引文再细一级——KWIC 片段**——句级引文仍带
+无关并列项（Kafka 那句 108 字里混着 SQL Server、MySQL、S3……），
+现在只留匹配词前后各 30 字、在 `, ` / `; ` / `: ` 处断开
+（`_kwic_snippet`，QUOTE_WINDOW_CHARS=30）。Kafka 引文 108 字 →
+"MySQL, NoSQL, S3, Kafka" 23 字；REST API 引文 105 字 →
+"distributed systems, REST APIs, microservices" 45 字；Spark 引文
+131 字 → "data pipelines using Spark, PySpark, Hadoop, APIs" 49 字。
+两个护栏：① 片段仍是原文子串（逐字规则照样过），切口只落在
+分隔符处、绝不断在词组中间（"ASP.NET" 不会丢下 " Core"）；
+② 锚点优先落在词边界——"SQL" 锚在 "SQL Server" 而不是 "MySQL"
+里面（`_anchor_pos`）。实测：材料 eval 三档 recall 不变
+（70%/85%/100%）、grounded 100%、没有规则变红；强档每条合格要点
+$0.00096 → $0.000627（约 −35%）、级联 $0.000924 → $0.000591、
+checked pipeline 总成本 $0.017829 → $0.011812；checker 对抗检测
+仍 8/8、修复 8/8。诚实注脚同上：离线账放大了降幅；另外片段会
+丢掉句首的标签（如 "Data and messaging:"），读证据时要连 chunk id
+一起看——标签丢了，来源没丢。
+
 ## 下一步预告
 
 - 真接一次 Batch API（Anthropic Message Batches，需 API key），

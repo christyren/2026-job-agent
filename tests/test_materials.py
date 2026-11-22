@@ -11,6 +11,8 @@ from job_agent.evaluate import load_material_cases, run_materials_eval
 from job_agent.materials import (
     MODEL_TIERS,
     RunBudget,
+    _anchor_pos,
+    _kwic_snippet,
     _minimal_quote,
     extract_requirements,
     generate_materials,
@@ -131,6 +133,55 @@ class TestMinimalQuotesInGeneration(unittest.TestCase):
         skills = next(c for c in CHUNKS if c.id == "resume-skills")
         # No sentence in the skills chunk mentions GraphQL at all.
         self.assertEqual(_minimal_quote(skills, "GraphQL"), skills.text)
+
+
+class TestKwicSnippets(unittest.TestCase):
+    """Iteration 2026-11-22: sentence-level quotes still carry unrelated
+    list items, so _minimal_quote now returns a keyword-in-context
+    snippet (term + ~30 chars each side, cut at separators)."""
+
+    def test_kafka_quote_is_a_snippet_not_the_whole_sentence(self):
+        skills = next(c for c in CHUNKS if c.id == "resume-skills")
+        quote = _minimal_quote(skills, "Kafka")
+        sentence = ("Data and messaging: SQL Server, MySQL, NoSQL, S3, Kafka, "
+                    "Azure Service Bus and Event Hubs, SQS and SNS.")
+        self.assertEqual(quote, "MySQL, NoSQL, S3, Kafka")
+        self.assertIn(quote, skills.text)          # still verbatim
+        self.assertLess(len(quote), len(sentence))  # head of list trimmed
+        self.assertNotIn("SQL Server", quote)
+
+    def test_rest_api_snippet_cuts_at_a_separator_not_mid_phrase(self):
+        skills = next(c for c in CHUNKS if c.id == "resume-skills")
+        quote = _minimal_quote(skills, "REST API")
+        self.assertEqual(quote, "distributed systems, REST APIs, microservices")
+        # The cut after "microservices" is at a ", " boundary: the next
+        # list item is gone whole, not half-kept ("ASP.NET" without " Core").
+        self.assertIn("microservices", quote)
+        self.assertNotIn("Spring Boot", quote)
+
+    def test_spark_quote_comes_from_the_data_ai_chunk(self):
+        dai = next(c for c in CHUNKS if c.id == "microsoft-data-ai")
+        quote = _minimal_quote(dai, "Spark")
+        self.assertEqual(quote, "data pipelines using Spark, PySpark, Hadoop, APIs")
+        self.assertIn(quote, dai.text)
+        self.assertNotIn("Contributed to", quote)  # sentence head trimmed
+
+    def test_sql_anchors_on_sql_server_not_inside_mysql(self):
+        # "SQL" occurs inside "MySQL" first in reading order? No — but
+        # the anchor must prefer a word-boundary hit either way.
+        self.assertEqual(_anchor_pos("x mysql sql server", "sql"), 8)
+        skills = next(c for c in CHUNKS if c.id == "resume-skills")
+        quote = _minimal_quote(skills, "SQL")
+        self.assertIn("SQL Server", quote)
+
+    def test_short_sentence_comes_back_unchanged(self):
+        self.assertEqual(_kwic_snippet("Short sentence with Kafka here.",
+                                       ["Kafka"]),
+                         "Short sentence with Kafka here.")
+
+    def test_no_anchor_returns_the_sentence(self):
+        self.assertEqual(_kwic_snippet("Nothing relevant here.", ["Kafka"]),
+                         "Nothing relevant here.")
 
 
 class TestRoutingAndBudget(unittest.TestCase):

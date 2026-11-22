@@ -195,8 +195,8 @@ class TestRepair(unittest.TestCase):
     def test_repaired_fake_gap_point_uses_minimal_quote(self):
         # 2026-11-20: adv-07's repair DOES create the REST API point,
         # so it goes through _point_for — its quote must be only the
-        # sentence that names REST APIs, still a verbatim substring of
-        # resume-skills, but shorter than the whole block.
+        # KWIC snippet around REST APIs (2026-11-22), still a verbatim
+        # substring of resume-skills, but shorter than the whole block.
         adv = self.adversarials["adv-07-fake-gap-rest-api"]
         report = check_materials(adv["job"], adv["draft"], chunks=self.chunks)
         fixed = repair_materials(adv["job"], adv["draft"], report["failures"],
@@ -249,18 +249,18 @@ class TestMinimalQuote(unittest.TestCase):
         self.skills = next(c for c in self.chunks if c.id == "resume-skills")
 
     def test_minimal_quote_is_the_sentence_that_names_it(self):
-        # 2026-11-20: the REST API evidence is one sentence of the
-        # four-sentence skills block — quote that sentence only.
+        # 2026-11-22: the REST API evidence is a KWIC snippet around
+        # the term — the sentence's middle clause, cut at ", " so it
+        # never ends mid-phrase ("ASP.NET" without " Core").
         quote = _minimal_quote(self.skills, "REST API")
         self.assertEqual(
-            quote, "Backend and cloud: distributed systems, REST APIs, "
-                   "microservices, Spring Boot, ASP.NET Core, AWS, Azure.")
+            quote, "distributed systems, REST APIs, microservices")
         self.assertIn(quote, self.skills.text)
 
     def test_minimal_quote_finds_first_sentence_for_java(self):
         quote = _minimal_quote(self.skills, "Java")
         self.assertEqual(
-            quote, "Programming: Java, C#, Python, JavaScript, TypeScript.")
+            quote, "Programming: Java, C#, Python, JavaScript")
         self.assertIn(quote, self.skills.text)
 
     def test_minimal_quote_falls_back_to_full_chunk(self):

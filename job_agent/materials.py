@@ -266,36 +266,130 @@ def validate_materials(raw: dict) -> dict:
     return raw
 
 
+def _anchor_pos(text_lower: str, anchor_lower: str) -> int:
+    """First occurrence of anchor that starts at a word boundary.
+
+    "SQL" must anchor on "SQL Server", not inside "MySQL" — so a hit
+    whose preceding char is alphanumeric is skipped and the search
+    continues. Falls back to the first occurrence of any kind, so a
+    term that only ever appears glued to another word still matches.
+    """
+    start = 0
+    first = -1
+    while True:
+        i = text_lower.find(anchor_lower, start)
+        if i < 0:
+            return first
+        if first < 0:
+            first = i
+        if i == 0 or not text_lower[i - 1].isalnum():
+            return i
+        start = i + 1
+
+
+# Iteration 2026-11-22: KWIC window. Sentence-level quotes still carry
+# unrelated list items ("Data and messaging: SQL Server, MySQL, NoSQL,
+# S3, Kafka, Azure Service Bus and Event Hubs, SQS and SNS" — the Kafka
+# evidence is one item in a 108-char list). Keep this many chars of
+# context on each side of the matched term, cut at separator boundaries.
+QUOTE_WINDOW_CHARS = 30
+
+
+def _kwic_snippet(sentence: str, anchors: list[str],
+                  window: int = QUOTE_WINDOW_CHARS) -> str:
+    """Keyword-in-context snippet: the matched term plus `window` chars
+    of context on each side, cut at separator boundaries (", ", "; ",
+    ": ") so the snippet never ends mid-phrase like "ASP.NET" without
+    its " Core". Still a verbatim substring of the sentence — the
+    grounding veto (quote must appear in the chunk) keeps passing, and
+    evidence_supports_requirement never reads the quote at all, so no
+    checker rule can turn red because a quote got shorter. If the
+    sentence already fits inside the window, it comes back unchanged;
+    if trimming would leave less than the term plus a little context,
+    the whole sentence is kept instead of a stub.
+    """
+    lowered = sentence.lower()
+    pos, anchor = -1, ""
+    for a in anchors:
+        i = _anchor_pos(lowered, a.lower())
+        if i >= 0:
+            pos, anchor = i, a
+            break
+    if pos < 0:
+        return sentence
+    start = max(0, pos - window)
+    end = min(len(sentence), pos + len(anchor) + window)
+    if start == 0 and end == len(sentence):
+        return sentence  # already fits in the window
+    seps = (", ", "; ", ": ")
+    if start > 0:
+        # Move forward past the first separator at/after start that
+        # still sits before the anchor; otherwise the first space.
+        cut = -1
+        for sep in seps:
+            j = sentence.find(sep, start, pos)
+            if j != -1 and (cut == -1 or j < cut):
+                cut = j + len(sep)
+        if cut != -1:
+            start = cut
+        else:
+            nxt = sentence.find(" ", start, pos)
+            if nxt != -1:
+                start = nxt + 1
+    if end < len(sentence):
+        # Move back to the last separator before end that still sits
+        # after the anchor; otherwise the last space.
+        cut = -1
+        anchor_end = pos + len(anchor)
+        for sep in seps:
+            j = sentence.rfind(sep, anchor_end, end)
+            if j != -1 and j > cut:
+                cut = j
+        if cut != -1:
+            end = cut
+        else:
+            prv = sentence.rfind(" ", anchor_end, end)
+            if prv != -1:
+                end = prv
+    snippet = sentence[start:end].strip(" ,;:")
+    if len(snippet) < len(anchor) + 4:
+        return sentence
+    return snippet
+
+
 def _minimal_quote(chunk: ResumeChunk, requirement: str) -> str:
-    """Quote only the sentence that mentions the requirement.
+    """Quote only the keyword-in-context snippet that mentions the
+    requirement.
 
     Iteration 2026-11-21: the generator used to paste the whole chunk
     (up to ~385 chars) into every point; the repair path has quoted
     minimally since 2026-11-20, and the two paths disagreed about what
-    a point looks like. Now the generator uses the same function, so
-    a point built by generation and a point built by repair are
-    indistinguishable. The sentence that names the requirement is
-    still a verbatim substring of the chunk, so evidence_verbatim
+    a point looks like. That iteration made both paths quote the same
+    sentence. Iteration 2026-11-22 goes one level finer: inside that
+    sentence, keep only the matched term plus ~30 chars of context on
+    each side (KWIC snippet), cut at separator boundaries. The snippet
+    is still a verbatim substring of the chunk, so evidence_verbatim
     still passes; evidence_supports_requirement never reads the quote
     (it checks the chunk's keywords), so trimming it cannot make that
     rule easier or harder — it only changes what the human reader
-    sees, and shrinks the token log, so cost per grounded point drops.
-    Falls back to the full chunk text when no single sentence mentions
-    the requirement. Lives here (not in checker.py) because the
-    generator needs it too and checker.py already imports from here —
-    the other direction would be a circular import.
+    sees, and shrinks the token log, so cost per grounded point drops
+    again. Falls back to the full chunk text when no single sentence
+    mentions the requirement. Lives here (not in checker.py) because
+    the generator needs it too and checker.py already imports from
+    here — the other direction would be a circular import.
     """
     req = requirement.lower()
     sentences = re.split(r"(?<=[.!?])\s+", chunk.text.strip())
     for sent in sentences:
         if req in sent.lower():
-            return sent
+            return _kwic_snippet(sent, [requirement])
     # The requirement's wording may differ from the chunk's wording:
     # try any keyword that covers the requirement.
     for sent in sentences:
-        if any(k.lower() in sent.lower() for k in chunk.keywords
-               if req in k.lower()):
-            return sent
+        covering = [k for k in chunk.keywords
+                    if req in k.lower() and k.lower() in sent.lower()]
+        if covering:
+            return _kwic_snippet(sent, covering)
     return chunk.text
 
 
