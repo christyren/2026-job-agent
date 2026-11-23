@@ -294,9 +294,36 @@ def _anchor_pos(text_lower: str, anchor_lower: str) -> int:
 # context on each side of the matched term, cut at separator boundaries.
 QUOTE_WINDOW_CHARS = 30
 
+# Iteration 2026-11-23: adaptive window. One fixed 30-char window is a
+# compromise that is too generous for a 345-char sentence (it still
+# leaves 60+ chars of list around the term) and too eager to cut a
+# 60-char one (there is nothing to trim — the whole sentence IS the
+# context). Scale the window to the sentence instead: short sentences
+# come back whole, medium ones keep 30, long ones get 20.
+SHORT_SENTENCE_CHARS = 80
+LONG_SENTENCE_CHARS = 150
+LONG_WINDOW_CHARS = 20
+
+
+def _adaptive_window(sentence_len: int,
+                     base: int = QUOTE_WINDOW_CHARS) -> int:
+    """Window size for a sentence of `sentence_len` chars.
+
+    <= 80 chars: return the length itself, so _kwic_snippet's
+    start/end math covers the whole sentence and nothing is cut.
+    81-150 chars: the usual 30. > 150 chars: 20 — long sentences in
+    this resume are comma lists, and a tighter window drops more of
+    the unrelated items around the matched term.
+    """
+    if sentence_len <= SHORT_SENTENCE_CHARS:
+        return sentence_len
+    if sentence_len <= LONG_SENTENCE_CHARS:
+        return base
+    return LONG_WINDOW_CHARS
+
 
 def _kwic_snippet(sentence: str, anchors: list[str],
-                  window: int = QUOTE_WINDOW_CHARS) -> str:
+                  window: int | None = None) -> str:
     """Keyword-in-context snippet: the matched term plus `window` chars
     of context on each side, cut at separator boundaries (", ", "; ",
     ": ") so the snippet never ends mid-phrase like "ASP.NET" without
@@ -306,8 +333,12 @@ def _kwic_snippet(sentence: str, anchors: list[str],
     checker rule can turn red because a quote got shorter. If the
     sentence already fits inside the window, it comes back unchanged;
     if trimming would leave less than the term plus a little context,
-    the whole sentence is kept instead of a stub.
+    the whole sentence is kept instead of a stub. `window=None` means
+    "pick it from the sentence length" (_adaptive_window); pass a
+    number only to pin one window for a test.
     """
+    if window is None:
+        window = _adaptive_window(len(sentence))
     lowered = sentence.lower()
     pos, anchor = -1, ""
     for a in anchors:

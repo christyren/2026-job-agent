@@ -109,6 +109,8 @@ checked pipeline 总成本 $0.017829 → $0.011812；checker 对抗检测
 丢掉句首的标签（如 "Data and messaging:"），读证据时要连 chunk id
 一起看——标签丢了，来源没丢。
 
+**2026-11-23 迭代 17：窗口自适应**——一个 30 字窗口对 345 字的长句太宽松（integration 引文仍有 49 字）、对 54 字的短句又太爱切（Java 引文曾被切掉 "TypeScript."）。现在窗口按句长分三档：≤80 字整句保留、81–150 字用 30、>150 字收紧到 20（`_adaptive_window`）。实测：Kafka / REST API / Spark 三条引文纹丝不动（句子都在 30 字档）；integration 引文 49 字 → "between Substrate and Item Query" 36 字；Java 引文恢复整句 "Programming: Java, C#, Python, JavaScript, TypeScript."。材料 eval 三档 recall 仍 70%/85%/100%、grounded 100%、checker 对抗仍 8/8 检测 + 8/8 修复；诚实账：强档每条合格要点 $0.000627 → $0.000649（约 +3.5%）——短句引文变长了，成本小涨，换的是可读性，这次不是省钱迭代。
+
 ## 下一步预告
 
 - 真接一次 Batch API（Anthropic Message Batches，需 API key），

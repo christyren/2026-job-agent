@@ -1,5 +1,6 @@
 """Milestone 4 tests: RAG retrieval, grounding veto, gaps, routing, budget, eval.
 Run with: python3 -m unittest discover -s tests -v  (no API key, no network)"""
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from job_agent.evaluate import load_material_cases, run_materials_eval
 from job_agent.materials import (
     MODEL_TIERS,
     RunBudget,
+    _adaptive_window,
     _anchor_pos,
     _kwic_snippet,
     _minimal_quote,
@@ -182,6 +184,48 @@ class TestKwicSnippets(unittest.TestCase):
     def test_no_anchor_returns_the_sentence(self):
         self.assertEqual(_kwic_snippet("Nothing relevant here.", ["Kafka"]),
                          "Nothing relevant here.")
+
+
+class TestAdaptiveWindow(unittest.TestCase):
+    """Iteration 2026-11-23: one fixed 30-char window is too generous
+    for 300-char sentences and too eager to cut 60-char ones — the
+    window now scales with sentence length."""
+
+    def test_window_bands_and_boundaries(self):
+        self.assertEqual(_adaptive_window(50), 50)    # short: never cut
+        self.assertEqual(_adaptive_window(80), 80)    # boundary: still whole
+        self.assertEqual(_adaptive_window(81), 30)    # medium: usual 30
+        self.assertEqual(_adaptive_window(150), 30)   # boundary: still 30
+        self.assertEqual(_adaptive_window(151), 20)   # long: tighter 20
+        self.assertEqual(_adaptive_window(345), 20)
+
+    def test_short_sentence_never_cut_even_with_anchor_in_the_middle(self):
+        # 44 chars, anchor in the middle: the old fixed window would
+        # have trimmed the ends; the adaptive window keeps it whole.
+        sent = "Java, C#, Python, Go and Rust are all here."
+        self.assertEqual(_kwic_snippet(sent, ["Python"]), sent)
+
+    def test_long_sentence_snippet_is_tighter_than_fixed_30(self):
+        integ = next(c for c in CHUNKS if c.id == "microsoft-integration")
+        long_sent = [s for s in re.split(
+            r"(?<=[.!?])\s+", integ.text.strip()) if len(s) > 300][0]
+        fixed = _kwic_snippet(long_sent, ["Substrate"], window=30)
+        adaptive = _kwic_snippet(long_sent, ["Substrate"])
+        self.assertIn("Substrate", adaptive)
+        self.assertIn(adaptive, long_sent)          # still verbatim
+        self.assertLessEqual(len(adaptive), len(fixed))
+
+    def test_medium_sentence_quotes_unchanged(self):
+        # Regression pins from iteration 16: sentences of 103-135 chars
+        # stay in the 30-char band, so these three quotes must not move.
+        skills = next(c for c in CHUNKS if c.id == "resume-skills")
+        self.assertEqual(_minimal_quote(skills, "Kafka"),
+                         "MySQL, NoSQL, S3, Kafka")
+        self.assertEqual(_minimal_quote(skills, "REST API"),
+                         "distributed systems, REST APIs, microservices")
+        dai = next(c for c in CHUNKS if c.id == "microsoft-data-ai")
+        self.assertEqual(_minimal_quote(dai, "Spark"),
+                         "data pipelines using Spark, PySpark, Hadoop, APIs")
 
 
 class TestRoutingAndBudget(unittest.TestCase):

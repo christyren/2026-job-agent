@@ -258,9 +258,12 @@ class TestMinimalQuote(unittest.TestCase):
         self.assertIn(quote, self.skills.text)
 
     def test_minimal_quote_finds_first_sentence_for_java(self):
+        # 2026-11-23: this sentence is only 54 chars, so the adaptive
+        # window keeps it whole — iteration 16's fixed 30-char window
+        # used to trim "TypeScript." off the end for no good reason.
         quote = _minimal_quote(self.skills, "Java")
         self.assertEqual(
-            quote, "Programming: Java, C#, Python, JavaScript")
+            quote, "Programming: Java, C#, Python, JavaScript, TypeScript.")
         self.assertIn(quote, self.skills.text)
 
     def test_minimal_quote_falls_back_to_full_chunk(self):
