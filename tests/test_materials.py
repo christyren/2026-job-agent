@@ -16,6 +16,7 @@ from job_agent.materials import (
     _anchor_pos,
     _kwic_snippet,
     _minimal_quote,
+    _neighborhood_separators,
     extract_requirements,
     generate_materials,
     load_resume_chunks,
@@ -155,7 +156,12 @@ class TestKwicSnippets(unittest.TestCase):
     def test_rest_api_snippet_cuts_at_a_separator_not_mid_phrase(self):
         skills = next(c for c in CHUNKS if c.id == "resume-skills")
         quote = _minimal_quote(skills, "REST API")
-        self.assertEqual(quote, "distributed systems, REST APIs, microservices")
+        # 2026-11-24: the anchor sits in a dense list (4 separators
+        # within 30 chars), so the window tightens 30 -> 20 and the
+        # quote drops "distributed systems" — the anchor plus one
+        # neighbour each side is still there, and the cut after
+        # "microservices" is still at a ", " boundary.
+        self.assertEqual(quote, "REST APIs, microservices")
         # The cut after "microservices" is at a ", " boundary: the next
         # list item is gone whole, not half-kept ("ASP.NET" without " Core").
         self.assertIn("microservices", quote)
@@ -164,7 +170,10 @@ class TestKwicSnippets(unittest.TestCase):
     def test_spark_quote_comes_from_the_data_ai_chunk(self):
         dai = next(c for c in CHUNKS if c.id == "microsoft-data-ai")
         quote = _minimal_quote(dai, "Spark")
-        self.assertEqual(quote, "data pipelines using Spark, PySpark, Hadoop, APIs")
+        # 2026-11-24: "Spark" has 4 separators within 30 chars, so the
+        # dense rule tightens 30 -> 20; the quote loses the "APIs" tail
+        # and the "data" head but keeps the term plus two neighbours.
+        self.assertEqual(quote, "pipelines using Spark, PySpark, Hadoop")
         self.assertIn(quote, dai.text)
         self.assertNotIn("Contributed to", quote)  # sentence head trimmed
 
@@ -215,17 +224,75 @@ class TestAdaptiveWindow(unittest.TestCase):
         self.assertIn(adaptive, long_sent)          # still verbatim
         self.assertLessEqual(len(adaptive), len(fixed))
 
-    def test_medium_sentence_quotes_unchanged(self):
-        # Regression pins from iteration 16: sentences of 103-135 chars
-        # stay in the 30-char band, so these three quotes must not move.
+    def test_medium_sentence_quotes_only_dense_ones_move(self):
+        # Regression pins from iteration 16, revised 2026-11-24: the
+        # dense rule tightens the window one notch only where the anchor
+        # is buried in a list. Kafka's sentence is dense but its quote
+        # is snap-stable at window 20, so it must not move; REST API
+        # and Spark are dense and their quotes tighten on purpose.
         skills = next(c for c in CHUNKS if c.id == "resume-skills")
         self.assertEqual(_minimal_quote(skills, "Kafka"),
                          "MySQL, NoSQL, S3, Kafka")
         self.assertEqual(_minimal_quote(skills, "REST API"),
-                         "distributed systems, REST APIs, microservices")
+                         "REST APIs, microservices")
         dai = next(c for c in CHUNKS if c.id == "microsoft-data-ai")
         self.assertEqual(_minimal_quote(dai, "Spark"),
-                         "data pipelines using Spark, PySpark, Hadoop, APIs")
+                         "pipelines using Spark, PySpark, Hadoop")
+
+
+class TestDenseNeighborhoodWindow(unittest.TestCase):
+    """Iteration 2026-11-24: tighten the window one notch only when the
+    anchor is buried in a list (>= 4 separators within the band's base
+    window around it). Counting the whole sentence misfires — the
+    345-char integration sentence has 9 items, but they all sit after
+    "services," while "Substrate" sits in the prose head, so a
+    whole-sentence count would cut "Query" off its quote for nothing.
+    """
+
+    def _sentence(self, chunk_id, needle):
+        chunk = next(c for c in CHUNKS if c.id == chunk_id)
+        return next(s for s in re.split(r"(?<=[.!?])\s+",
+                                        chunk.text.strip()) if needle in s)
+
+    def test_neighborhood_separator_counts(self):
+        integ = self._sentence("microsoft-integration", "Substrate")
+        self.assertEqual(_neighborhood_separators(
+            integ, integ.find("Substrate"), len("Substrate"), 20), 0)
+        rest = self._sentence("resume-skills", "REST APIs")
+        self.assertEqual(_neighborhood_separators(
+            rest, rest.find("REST API"), len("REST API"), 30), 4)
+        spark = self._sentence("microsoft-data-ai", "Spark")
+        self.assertEqual(_neighborhood_separators(
+            spark, spark.find("Spark"), len("Spark"), 30), 4)
+        kafka = self._sentence("resume-skills", "Kafka")
+        self.assertEqual(_neighborhood_separators(
+            kafka, kafka.find("Kafka"), len("Kafka"), 30), 5)
+
+    def test_dense_flag_tightens_one_notch_per_band(self):
+        self.assertEqual(_adaptive_window(50, dense=True), 50)   # short: never cut
+        self.assertEqual(_adaptive_window(104, dense=True), 20)  # medium 30 -> 20
+        self.assertEqual(_adaptive_window(104, dense=False), 30)
+        self.assertEqual(_adaptive_window(345, dense=True), 15)  # long 20 -> 15
+        self.assertEqual(_adaptive_window(345, dense=False), 20)
+
+    def test_prose_head_anchor_does_not_tighten(self):
+        # The integration sentence is long AND list-dense as a whole,
+        # but "Substrate" sits in the prose head with 0 separators
+        # nearby — its quote must stay exactly as iteration 17 left it.
+        integ = next(c for c in CHUNKS if c.id == "microsoft-integration")
+        self.assertEqual(_minimal_quote(integ, "Substrate"),
+                         "between Substrate and Item Query")
+
+    def test_dense_medium_quotes_tighten_but_stay_verbatim(self):
+        skills = next(c for c in CHUNKS if c.id == "resume-skills")
+        self.assertEqual(_minimal_quote(skills, "CI/CD"),
+                         "DevOps: Linux, CI/CD, Docker")
+        self.assertEqual(_minimal_quote(skills, "Docker"),
+                         "Linux, CI/CD, Docker, CloudFormation")
+        for req in ("CI/CD", "Docker"):
+            quote = _minimal_quote(skills, req)
+            self.assertIn(quote, skills.text)      # still verbatim
+            self.assertIn(req, quote)              # anchor survives
 
 
 class TestRoutingAndBudget(unittest.TestCase):

@@ -305,21 +305,50 @@ LONG_SENTENCE_CHARS = 150
 LONG_WINDOW_CHARS = 20
 
 
+# Iteration 2026-11-24: density-aware window. Length alone is a blunt
+# signal: a 345-char sentence can be prose with a list tail, while a
+# 104-char sentence can be nothing but a list. Tighten one notch when
+# the ANCHOR is buried in a list — at least this many separators
+# (", ", "; ", ": ") within the length band's base window around it.
+# Threshold picked by measuring the real sentences: the integration
+# sentence has 0 separators near "Substrate" (its 9 items all sit
+# after "services,"), Kafka 5, REST API 4, Spark 4, CI/CD 5 — so 4
+# separates "anchor with a couple of neighbours" from "anchor buried
+# in a list". Counting the whole sentence instead would misfire on
+# the integration sentence and tighten it to 15, cutting "Query" off
+# its quote for nothing.
+DENSE_NEIGHBORHOOD_SEPARATORS = 4
+DENSE_WINDOW_CHARS = 15
+
+
+def _neighborhood_separators(sentence: str, pos: int, anchor_len: int,
+                             window: int) -> int:
+    """Separators sitting within `window` chars of the anchor at `pos`
+    (the anchor itself plus `window` chars on each side). This is the
+    density that matters: separators far from the anchor are items the
+    snippet never reaches anyway."""
+    seps = (", ", "; ", ": ")
+    start = max(0, pos - window)
+    end = min(len(sentence), pos + anchor_len + window)
+    return sum(sentence.count(sep, start, end) for sep in seps)
+
+
 def _adaptive_window(sentence_len: int,
-                     base: int = QUOTE_WINDOW_CHARS) -> int:
+                     base: int = QUOTE_WINDOW_CHARS,
+                     dense: bool = False) -> int:
     """Window size for a sentence of `sentence_len` chars.
 
     <= 80 chars: return the length itself, so _kwic_snippet's
     start/end math covers the whole sentence and nothing is cut.
-    81-150 chars: the usual 30. > 150 chars: 20 — long sentences in
-    this resume are comma lists, and a tighter window drops more of
-    the unrelated items around the matched term.
+    81-150 chars: the usual 30, or 20 when the anchor is buried in a
+    list (`dense`). > 150 chars: 20, or 15 when dense. Short sentences
+    ignore `dense` — the whole sentence IS the context.
     """
     if sentence_len <= SHORT_SENTENCE_CHARS:
         return sentence_len
     if sentence_len <= LONG_SENTENCE_CHARS:
-        return base
-    return LONG_WINDOW_CHARS
+        return LONG_WINDOW_CHARS if dense else base
+    return DENSE_WINDOW_CHARS if dense else LONG_WINDOW_CHARS
 
 
 def _kwic_snippet(sentence: str, anchors: list[str],
@@ -334,11 +363,10 @@ def _kwic_snippet(sentence: str, anchors: list[str],
     sentence already fits inside the window, it comes back unchanged;
     if trimming would leave less than the term plus a little context,
     the whole sentence is kept instead of a stub. `window=None` means
-    "pick it from the sentence length" (_adaptive_window); pass a
-    number only to pin one window for a test.
+    "pick it from the sentence length and the anchor's neighbourhood"
+    (_adaptive_window + _neighborhood_separators); pass a number only
+    to pin one window for a test.
     """
-    if window is None:
-        window = _adaptive_window(len(sentence))
     lowered = sentence.lower()
     pos, anchor = -1, ""
     for a in anchors:
@@ -348,6 +376,15 @@ def _kwic_snippet(sentence: str, anchors: list[str],
             break
     if pos < 0:
         return sentence
+    if window is None:
+        # Measure density around the anchor with the length band's base
+        # window first, then tighten one notch only if the anchor is
+        # buried in a list. The anchor search above runs first because
+        # the density metric needs its position.
+        base = _adaptive_window(len(sentence))
+        dense = (_neighborhood_separators(sentence, pos, len(anchor), base)
+                 >= DENSE_NEIGHBORHOOD_SEPARATORS)
+        window = _adaptive_window(len(sentence), dense=dense)
     start = max(0, pos - window)
     end = min(len(sentence), pos + len(anchor) + window)
     if start == 0 and end == len(sentence):

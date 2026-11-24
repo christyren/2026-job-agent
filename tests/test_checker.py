@@ -252,9 +252,12 @@ class TestMinimalQuote(unittest.TestCase):
         # 2026-11-22: the REST API evidence is a KWIC snippet around
         # the term — the sentence's middle clause, cut at ", " so it
         # never ends mid-phrase ("ASP.NET" without " Core").
+        # 2026-11-24: the anchor sits in a dense list, so the window
+        # tightens 30 -> 20 and the quote is now just the term plus
+        # one neighbour each side.
         quote = _minimal_quote(self.skills, "REST API")
         self.assertEqual(
-            quote, "distributed systems, REST APIs, microservices")
+            quote, "REST APIs, microservices")
         self.assertIn(quote, self.skills.text)
 
     def test_minimal_quote_finds_first_sentence_for_java(self):

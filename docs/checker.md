@@ -111,6 +111,8 @@ checked pipeline 总成本 $0.017829 → $0.011812；checker 对抗检测
 
 **2026-11-23 迭代 17：窗口自适应**——一个 30 字窗口对 345 字的长句太宽松（integration 引文仍有 49 字）、对 54 字的短句又太爱切（Java 引文曾被切掉 "TypeScript."）。现在窗口按句长分三档：≤80 字整句保留、81–150 字用 30、>150 字收紧到 20（`_adaptive_window`）。实测：Kafka / REST API / Spark 三条引文纹丝不动（句子都在 30 字档）；integration 引文 49 字 → "between Substrate and Item Query" 36 字；Java 引文恢复整句 "Programming: Java, C#, Python, JavaScript, TypeScript."。材料 eval 三档 recall 仍 70%/85%/100%、grounded 100%、checker 对抗仍 8/8 检测 + 8/8 修复；诚实账：强档每条合格要点 $0.000627 → $0.000649（约 +3.5%）——短句引文变长了，成本小涨，换的是可读性，这次不是省钱迭代。
 
+**2026-11-24 迭代 18：窗口按锚点周围的密度调**——句长是粗信号：345 字的 integration 句是散文头 + 列表尾，104 字的 REST API 句通篇都是列表。所以窗口再收一档的条件不是"句长"，而是"锚点周围密不密"：锚点前后一个基础窗口内 ≥4 个分隔符（`, ` / `; ` / `: `）才算埋进列表里（`_neighborhood_separators`），中句 30→20、长句 20→15。先量再定的教训：整句数项数会误伤——integration 句整句 9 项、锚点周围 0 个，按整句数会把它收到 15 字、把引文里的 "Query" 切掉；按锚点周围数，它 stays 20、引文不动。实测：REST API 引文 45 字 → "REST APIs, microservices" 24 字、Spark 49 字 → "pipelines using Spark, PySpark, Hadoop" 38 字、CI/CD 44 字 → "DevOps: Linux, CI/CD, Docker" 28 字；Kafka 因分隔符断点位置不变、纹丝不动；integration、Java 引文不动。材料 eval 三档 recall 仍 70%/85%/100%、grounded 100%、checker 对抗仍 8/8 检测 + 8/8 修复；强档每条合格要点 $0.000649 → $0.000582（约 −10%）、级联 $0.000613 → $0.000545、checked pipeline 总成本 $0.012213 → $0.010994——这次是省钱迭代，省的是输出 token（离线账把引文同时算进输入和输出，降幅被放大，方向对、数字别照搬）。
+
 ## 下一步预告
 
 - 真接一次 Batch API（Anthropic Message Batches，需 API key），
