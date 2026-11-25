@@ -317,7 +317,18 @@ LONG_WINDOW_CHARS = 20
 # in a list". Counting the whole sentence instead would misfire on
 # the integration sentence and tighten it to 15, cutting "Query" off
 # its quote for nothing.
-DENSE_NEIGHBORHOOD_SEPARATORS = 4
+# Iteration 2026-11-25: 4 -> 5. The sensitivity run showed 4 was
+# trimming real context, not just list padding: at 4, REST API lost
+# its "distributed systems" lead-in (45 -> 24 chars) and Spark lost
+# "data pipelines" / ", APIs" (49 -> 38). Both sit exactly on the
+# boundary, and what got cut was signal. At 5 only Kafka (5),
+# CI/CD (5) and Docker (6) stay tight — pure item lists where the
+# cut loses nothing — while REST API and Spark keep their fuller
+# quotes. Cost of the fuller quotes: strong per grounded point
+# $0.000582 -> $0.000606 (+4%, ~$0.005 on 200 jobs) — noise-level.
+# Lesson: a threshold is a claim about where signal ends and noise
+# begins; moving it one notch and re-measuring is how you check it.
+DENSE_NEIGHBORHOOD_SEPARATORS = 5
 DENSE_WINDOW_CHARS = 15
 
 

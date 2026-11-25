@@ -253,11 +253,14 @@ class TestMinimalQuote(unittest.TestCase):
         # the term — the sentence's middle clause, cut at ", " so it
         # never ends mid-phrase ("ASP.NET" without " Core").
         # 2026-11-24: the anchor sits in a dense list, so the window
-        # tightens 30 -> 20 and the quote is now just the term plus
+        # tightened 30 -> 20 and the quote was just the term plus
         # one neighbour each side.
+        # 2026-11-25: threshold 4 -> 5 — 4 separators is no longer
+        # dense, and "distributed systems" is real context, so the
+        # quote is back to the 11/23 shape (window 30).
         quote = _minimal_quote(self.skills, "REST API")
         self.assertEqual(
-            quote, "REST APIs, microservices")
+            quote, "distributed systems, REST APIs, microservices")
         self.assertIn(quote, self.skills.text)
 
     def test_minimal_quote_finds_first_sentence_for_java(self):

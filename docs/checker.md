@@ -119,3 +119,5 @@ checked pipeline 总成本 $0.017829 → $0.011812；checker 对抗检测
   把规则打分换成模型打分、对比确定性版。
 - 或者把 checker 换成小模型调用：同样的 5 条规则、让模型当 checker，
   量它的检测率与成本——那时"核对比生成便宜"就不再是假设，而是 eval 数字。
+
+**2026-11-25 迭代 19：阈值敏感度分析（DENSE_NEIGHBORHOOD_SEPARATORS 4 → 5）**——接 11/24 留的练习，先预测、再实测、最后才决定留不留。预测：REST API（邻域 4 个分隔符）与 Spark（4 个）不再算"埋进列表"，窗口 30→20 的收紧取消，引文变回 11/23 的样子（45 字 / 49 字）；Kafka（5）、CI/CD（5）、Docker（6）仍收紧，不动；integration（0）、Java（短句整句）不动；recall 与 checker eval 不变。实测全中：REST API 24 字 → "distributed systems, REST APIs, microservices" 45 字、Spark 38 字 → "data pipelines using Spark, PySpark, Hadoop, APIs" 49 字，其余四条纹丝不动；材料 eval 三档 recall 仍 70%/85%/100%、grounded 100%、checker 对抗仍 8/8 检测 + 8/8 修复。决定留 5 不回 4：4 档切掉的是真上下文（"distributed systems"、"data pipelines" 是信号不是列表填充），5 档只在锚点真被 5 项以上包围时才收——Kafka / CI/CD / Docker 的干净收益全保留。代价：强档每条合格要点 $0.000582 → $0.000606（约 +4%）、级联 $0.000545 → $0.000570、checked pipeline 总成本 $0.010994 → $0.011428，200 个岗位约多 $0.005，噪声级。4 个测试按新行为更新（钉旧引文的断言，不是代码 bug）。

@@ -157,11 +157,14 @@ class TestKwicSnippets(unittest.TestCase):
         skills = next(c for c in CHUNKS if c.id == "resume-skills")
         quote = _minimal_quote(skills, "REST API")
         # 2026-11-24: the anchor sits in a dense list (4 separators
-        # within 30 chars), so the window tightens 30 -> 20 and the
-        # quote drops "distributed systems" — the anchor plus one
-        # neighbour each side is still there, and the cut after
-        # "microservices" is still at a ", " boundary.
-        self.assertEqual(quote, "REST APIs, microservices")
+        # within 30 chars), so the window tightened 30 -> 20 and the
+        # quote dropped "distributed systems".
+        # 2026-11-25: threshold 4 -> 5 — 4 separators is no longer
+        # "buried in a list", and "distributed systems" is real
+        # context, not list padding, so the quote is back to the
+        # 11/23 shape (window 30). The cut after "microservices" is
+        # still at a ", " boundary.
+        self.assertEqual(quote, "distributed systems, REST APIs, microservices")
         # The cut after "microservices" is at a ", " boundary: the next
         # list item is gone whole, not half-kept ("ASP.NET" without " Core").
         self.assertIn("microservices", quote)
@@ -171,9 +174,12 @@ class TestKwicSnippets(unittest.TestCase):
         dai = next(c for c in CHUNKS if c.id == "microsoft-data-ai")
         quote = _minimal_quote(dai, "Spark")
         # 2026-11-24: "Spark" has 4 separators within 30 chars, so the
-        # dense rule tightens 30 -> 20; the quote loses the "APIs" tail
-        # and the "data" head but keeps the term plus two neighbours.
-        self.assertEqual(quote, "pipelines using Spark, PySpark, Hadoop")
+        # dense rule tightened 30 -> 20; the quote lost the "APIs" tail
+        # and the "data" head but kept the term plus two neighbours.
+        # 2026-11-25: threshold 4 -> 5 — 4 separators no longer counts
+        # as buried, so the quote is back to the 11/23 shape (window
+        # 30): "data pipelines" and the ", APIs" tail are real context.
+        self.assertEqual(quote, "data pipelines using Spark, PySpark, Hadoop, APIs")
         self.assertIn(quote, dai.text)
         self.assertNotIn("Contributed to", quote)  # sentence head trimmed
 
@@ -225,28 +231,32 @@ class TestAdaptiveWindow(unittest.TestCase):
         self.assertLessEqual(len(adaptive), len(fixed))
 
     def test_medium_sentence_quotes_only_dense_ones_move(self):
-        # Regression pins from iteration 16, revised 2026-11-24: the
-        # dense rule tightens the window one notch only where the anchor
-        # is buried in a list. Kafka's sentence is dense but its quote
-        # is snap-stable at window 20, so it must not move; REST API
-        # and Spark are dense and their quotes tighten on purpose.
+        # Regression pins from iteration 16, revised 2026-11-24 and
+        # 2026-11-25: the dense rule tightens the window one notch
+        # only where the anchor is buried in a list. Kafka's sentence
+        # is dense but its quote is snap-stable at window 20, so it
+        # must not move. REST API and Spark have 4 separators nearby —
+        # dense at threshold 4 (11/24), not dense at threshold 5
+        # (11/25) — so their quotes are back to the 11/23 shape.
         skills = next(c for c in CHUNKS if c.id == "resume-skills")
         self.assertEqual(_minimal_quote(skills, "Kafka"),
                          "MySQL, NoSQL, S3, Kafka")
         self.assertEqual(_minimal_quote(skills, "REST API"),
-                         "REST APIs, microservices")
+                         "distributed systems, REST APIs, microservices")
         dai = next(c for c in CHUNKS if c.id == "microsoft-data-ai")
         self.assertEqual(_minimal_quote(dai, "Spark"),
-                         "pipelines using Spark, PySpark, Hadoop")
+                         "data pipelines using Spark, PySpark, Hadoop, APIs")
 
 
 class TestDenseNeighborhoodWindow(unittest.TestCase):
     """Iteration 2026-11-24: tighten the window one notch only when the
-    anchor is buried in a list (>= 4 separators within the band's base
-    window around it). Counting the whole sentence misfires — the
-    345-char integration sentence has 9 items, but they all sit after
-    "services," while "Substrate" sits in the prose head, so a
-    whole-sentence count would cut "Query" off its quote for nothing.
+    anchor is buried in a list (>= 5 separators within the band's base
+    window around it; 4 at first, raised to 5 on 2026-11-25 when the
+    sensitivity run showed 4 was trimming real context). Counting the
+    whole sentence misfires — the 345-char integration sentence has 9
+    items, but they all sit after "services," while "Substrate" sits
+    in the prose head, so a whole-sentence count would cut "Query" off
+    its quote for nothing.
     """
 
     def _sentence(self, chunk_id, needle):
